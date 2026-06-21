@@ -1,26 +1,147 @@
 @import "tailwindcss";
 
+.tutorial-active-target {
+  outline: 3px solid rgba(115, 197, 255, 0.5);
+  outline-offset: 5px;
+  transition: outline-color 180ms ease;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f9fafb;
+  --foreground: #111827;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+.app-color-theme {
+  background-color: var(--app-theme-background);
+  color: var(--app-theme-text);
+}
+
+.app-color-theme > aside,
+.app-color-theme .bg-white {
+  background-color: var(--app-theme-surface) !important;
+}
+
+.app-color-theme > main,
+.app-color-theme .bg-gray-50 {
+  background-color: var(--app-theme-background) !important;
+}
+
+.app-color-theme .app-theme-nav-link:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--app-theme-accent) 14%,
+    transparent
+  );
+  color: var(--app-theme-accent);
+}
+
+.app-color-theme .app-theme-accent-badge {
+  border-color: color-mix(
+    in srgb,
+    var(--app-theme-accent) 35%,
+    transparent
+  );
+  background-color: color-mix(
+    in srgb,
+    var(--app-theme-accent) 16%,
+    transparent
+  );
+  color: var(--app-theme-accent);
+}
+
+.app-color-theme :is(.bg-black, .bg-blue-600, .bg-violet-600) {
+  background-color: var(--app-theme-accent) !important;
+}
+
+.app-color-theme :is(.text-blue-600, .text-violet-600, .text-violet-700) {
+  color: var(--app-theme-accent) !important;
+}
+
+.app-color-theme :is(.border-black, .border-violet-300) {
+  border-color: var(--app-theme-accent) !important;
+}
+
+.app-color-theme
+  :is(.text-gray-950, .text-gray-900, .text-gray-800, .text-gray-700) {
+  color: var(--app-theme-text) !important;
+}
+
+.cursor-y2k-arrow,
+.cursor-y2k-arrow *,
+.cursor-y2k-arrow button,
+.cursor-y2k-arrow a,
+.cursor-y2k-arrow input,
+.cursor-y2k-arrow textarea,
+.cursor-y2k-arrow select {
+  cursor: url("/cursors/y2k.png") 4 4, auto !important;
+}
+
+.cursor-heart,
+.cursor-heart *,
+.cursor-heart button,
+.cursor-heart a,
+.cursor-heart input,
+.cursor-heart textarea,
+.cursor-heart select {
+  cursor: url("/cursors/heart.png") 4 4, auto !important;
+}
+
+.cursor-cute-pointer,
+.cursor-cute-pointer *,
+.cursor-cute-pointer button,
+.cursor-cute-pointer a,
+.cursor-cute-pointer input,
+.cursor-cute-pointer textarea,
+.cursor-cute-pointer select {
+  cursor: url("/cursors/pointer.png") 4 4, auto !important;
+}
+
+.cursor-star,
+.cursor-star *,
+.cursor-star button,
+.cursor-star a,
+.cursor-star input,
+.cursor-star textarea,
+.cursor-star select {
+  cursor: url("/cursors/star.png") 4 4, auto !important;
+}
+
+.heart-trail-particle {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  font-size: 18px;
+  color: #ff6fae;
+  animation: heartTrailFade 500ms ease-out forwards;
+  user-select: none;
+  pointer-events: none;
+}
+
+.cursor-trail-image {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  animation: cursorTrailImageFade 650ms ease-out forwards;
+}
+
+@keyframes cursorTrailImageFade {
+  0% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -90%) scale(0.35);
+  }
 }
