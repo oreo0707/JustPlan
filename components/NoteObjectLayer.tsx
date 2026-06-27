@@ -15,6 +15,11 @@ type NoteObjectLayerProps = {
   drawingTool: "draw" | "erase";
   drawingColor: string;
   drawingStrokeWidth: number;
+  theme?: "light" | "dark";
+  saveRequestId?: number;
+  pageWidth?: number;
+  pageHeight?: number;
+  pageCount?: number;
 };
 
 type SelectionBox = {
@@ -284,31 +289,61 @@ export function NoteObjectLayer({
   drawingTool,
   drawingColor,
   drawingStrokeWidth,
+  theme = "light",
+  saveRequestId = 0,
+  pageWidth = 794,
+  pageHeight = 1123,
+  pageCount = 1,
 }: NoteObjectLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
-  const isCommittingPendingDrawingsRef = useRef(false);
+  const lastHandledSaveRequestIdRef = useRef(0);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
+  const isDark = theme === "dark";
+  const objectControlPanelClass = isDark
+    ? "pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-sm"
+    : "pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm";
+  const objectControlButtonClass = isDark
+    ? "rounded-md px-2 py-1 text-slate-100 hover:bg-slate-800"
+    : "rounded-md px-2 py-1 text-gray-700 hover:bg-gray-100";
+  const objectHandleClass = isDark
+    ? "border-slate-500 bg-slate-900 shadow-sm"
+    : "border bg-white shadow-sm";
+  const textBoxMenuClass = isDark
+    ? "pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+    : "pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg";
+  const textBoxLabelClass = isDark
+    ? "flex items-center gap-1 text-slate-100"
+    : "flex items-center gap-1 text-gray-700";
+  const drawingHeight = pageHeight * pageCount;
+
+  function isPointInsidePaper(point: DrawingPoint) {
+    return (
+      point.x >= 0 &&
+      point.x <= pageWidth &&
+      point.y >= 0 &&
+      point.y <= drawingHeight
+    );
+  }
 
   useEffect(() => {
     if (
-      drawingMode ||
+      saveRequestId === 0 ||
       pendingDrawings.length === 0 ||
-      isCommittingPendingDrawingsRef.current
+      lastHandledSaveRequestIdRef.current === saveRequestId
     ) {
       return;
     }
 
+    lastHandledSaveRequestIdRef.current = saveRequestId;
     onChangeObjects([...objects, ...pendingDrawings]);
-    isCommittingPendingDrawingsRef.current = true;
     window.setTimeout(() => {
       setPendingDrawings([]);
-      isCommittingPendingDrawingsRef.current = false;
     }, 0);
-  }, [drawingMode, objects, onChangeObjects, pendingDrawings]);
+  }, [objects, onChangeObjects, pendingDrawings, saveRequestId]);
 
   function updateObject(id: string, updates: Partial<NoteObject>) {
     onChangeObjects(
@@ -467,13 +502,13 @@ export function NoteObjectLayer({
 
   function renderLayerControls() {
     return (
-      <div className="pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm">
+      <div className={objectControlPanelClass}>
         {(["back", "front"] as LayerDirection[]).map(
           (direction) => (
             <button
               key={direction}
               type="button"
-              className="rounded-md px-2 py-1 text-gray-700 hover:bg-gray-100"
+              className={objectControlButtonClass}
               title={
                 direction === "back"
                   ? "Send to back"
@@ -650,6 +685,8 @@ export function NoteObjectLayer({
     });
 
     function eraseAt(point: DrawingPoint) {
+      if (!isPointInsidePaper(point)) return;
+
       let savedChanged = false;
       let pendingChanged = false;
       const nextObjects = workingObjects.flatMap((object) => {
@@ -735,11 +772,21 @@ export function NoteObjectLayer({
     });
 
     const firstPoint = getPoint(event);
+    if (!isPointInsidePaper(firstPoint)) {
+      if (drawingElement.hasPointerCapture(pointerId)) {
+        drawingElement.releasePointerCapture(pointerId);
+      }
+
+      return;
+    }
+
     let points = [firstPoint];
     setActiveDrawingPoints(points);
     onSelectionChange([]);
 
     function addPoint(nextPoint: DrawingPoint) {
+      if (!isPointInsidePaper(nextPoint)) return;
+
       const lastPoint = points[points.length - 1];
       const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
 
@@ -1082,14 +1129,14 @@ export function NoteObjectLayer({
                     {renderLayerControls()}
                   </div>
                   <div
-                    className="pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    className={`pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                     style={{ left: points.startX, top: points.startY }}
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "start")
                     }
                   />
                   <div
-                    className="pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    className={`pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                     style={{ left: points.endX, top: points.endY }}
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "end")
@@ -1162,7 +1209,11 @@ export function NoteObjectLayer({
 
                     <button
                       type="button"
-                      className="absolute -top-7 left-14 rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                      className={
+                        isDark
+                          ? "absolute -top-7 left-14 rounded-md bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm ring-1 ring-slate-700"
+                          : "absolute -top-7 left-14 rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                      }
                       onPointerDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -1180,13 +1231,13 @@ export function NoteObjectLayer({
 
                     {openTextBoxMenuId === object.id && (
                       <div
-                        className="pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                        className={textBoxMenuClass}
                         onPointerDown={(event) => {
                           event.stopPropagation();
                         }}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <label className="flex items-center gap-1 text-gray-700">
+                        <label className={textBoxLabelClass}>
                           Color
                           <input
                             type="color"
@@ -1224,11 +1275,11 @@ export function NoteObjectLayer({
                           U
                         </button>
 
-                        <label className="flex items-center gap-1 text-gray-700">
+                        <label className={textBoxLabelClass}>
                           Size
                           <select
                             value={object.fontSize ?? 16}
-                            className="rounded border px-2 py-1"
+                            className={isDark ? "rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-100" : "rounded border px-2 py-1"}
                             onChange={(event) =>
                               applyTextBoxStyle(object, {
                                 fontSize: Number(event.target.value),
@@ -1243,11 +1294,11 @@ export function NoteObjectLayer({
                           </select>
                         </label>
 
-                        <label className="flex items-center gap-1 text-gray-700">
+                        <label className={textBoxLabelClass}>
                           Font
                           <select
                             value={object.fontFamily ?? "Arial"}
-                            className="rounded border px-2 py-1"
+                            className={isDark ? "rounded border border-slate-600 bg-slate-800 px-2 py-1 text-slate-100" : "rounded border px-2 py-1"}
                             onChange={(event) =>
                               applyTextBoxStyle(object, {
                                 fontFamily: event.target.value,
@@ -1271,7 +1322,7 @@ export function NoteObjectLayer({
                   suppressContentEditableWarning
                   className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...'] [&_span]:inline-block [&_span]:align-bottom [&_span]:leading-none [&_*]:align-bottom"
                   style={{
-                    color: object.color ?? "#111827",
+                    color: object.color ?? (isDark ? "#f8fafc" : "#111827"),
                     fontSize: `${object.fontSize ?? 16}px`,
                     fontFamily: object.fontFamily ?? "Arial",
                     lineHeight: "32px",
@@ -1397,7 +1448,7 @@ export function NoteObjectLayer({
               shapeVertices.map((vertex, index) => (
                 <div
                   key={`${object.id}-vertex-${index}`}
-                  className="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                  className={`absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                   style={{ left: vertex.x, top: vertex.y }}
                   onPointerDown={(event) =>
                     startVertexDrag(event, object, index)
@@ -1412,21 +1463,21 @@ export function NoteObjectLayer({
                 {(object.type === "image" || object.type === "sticker") && (
                   <>
                     <div
-                      className="absolute -right-2 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border bg-white shadow-sm"
+                      className={`absolute -right-2 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full ${objectHandleClass}`}
                       title="Resize width"
                       onPointerDown={(event) =>
                         startResize(event, object, "horizontal")
                       }
                     />
                     <div
-                      className="absolute -bottom-2 left-1/2 h-3 w-7 -translate-x-1/2 cursor-ns-resize rounded-full border bg-white shadow-sm"
+                      className={`absolute -bottom-2 left-1/2 h-3 w-7 -translate-x-1/2 cursor-ns-resize rounded-full ${objectHandleClass}`}
                       title="Resize height"
                       onPointerDown={(event) =>
                         startResize(event, object, "vertical")
                       }
                     />
                     <div
-                      className="absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                      className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                       title="Scale proportionally"
                       onPointerDown={(event) =>
                         startResize(event, object, "proportional")
@@ -1438,7 +1489,7 @@ export function NoteObjectLayer({
                   object.type !== "image" &&
                   object.type !== "sticker" && (
                   <div
-                    className="absolute -right-2 -bottom-2 h-4 w-4 cursor-se-resize rounded-full border bg-white"
+                    className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-se-resize rounded-full ${objectHandleClass}`}
                     onPointerDown={(event) =>
                       startResize(event, object, "free")
                     }

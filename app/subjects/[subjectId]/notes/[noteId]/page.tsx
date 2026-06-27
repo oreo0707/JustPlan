@@ -46,9 +46,11 @@ export default function NoteEditorPage() {
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(4);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showDrawMenu, setShowDrawMenu] = useState(false);
   const [showPagePanel, setShowPagePanel] = useState(false);
   const [showNoteMenu, setShowNoteMenu] = useState(false);
   const [textContentHeight, setTextContentHeight] = useState(0);
+  const [saveRequestId, setSaveRequestId] = useState(0);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
@@ -130,6 +132,8 @@ export default function NoteEditorPage() {
   }, [data, hasLoaded, subjectId, noteId]);
 
   function handleSaveNote() {
+    setSaveRequestId((current) => current + 1);
+
     const updatedData = updateNoteContent(
       data,
       subjectId,
@@ -780,6 +784,47 @@ function addTextBox() {
     );
   }
 
+  const isDarkNoteTheme = data.settings.theme === "dark";
+  const noteToolbarButtonClass = isDarkNoteTheme
+    ? "rounded-lg border border-slate-600 bg-slate-800 px-3 py-1 text-sm text-slate-100 hover:bg-slate-700"
+    : "rounded-lg border px-3 py-1 text-sm";
+  const noteToolbarMenuClass = isDarkNoteTheme
+    ? "absolute left-0 top-9 z-[10001] w-52 rounded-xl border border-slate-700 bg-slate-900 p-2 text-slate-100 shadow-lg"
+    : "absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg";
+  const noteToolbarMenuItemClass = isDarkNoteTheme
+    ? "w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800"
+    : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50";
+  const noteToolbarSelectClass = isDarkNoteTheme
+    ? "mt-1 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+    : "mt-1 w-full rounded-lg border px-3 py-2 text-sm";
+  const noteStickerGridClass = isDarkNoteTheme
+    ? "mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 p-2"
+    : "mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2";
+  const noteStickerButtonClass = isDarkNoteTheme
+    ? "rounded-lg border border-slate-700 bg-slate-900 p-1 text-left hover:bg-slate-800"
+    : "rounded-lg border bg-white p-1 text-left hover:bg-gray-100";
+  const notePageClass = isDarkNoteTheme
+    ? "h-screen overflow-auto bg-slate-950 text-slate-100"
+    : "h-screen overflow-auto bg-gray-50";
+  const noteHeaderClass = isDarkNoteTheme
+    ? "no-print flex items-center justify-between border-b border-slate-800 bg-slate-950 px-16 py-3 text-slate-100"
+    : "no-print flex items-center justify-between border-b bg-white px-16 py-3";
+  const noteTopButtonClass = isDarkNoteTheme
+    ? "rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800"
+    : "rounded-lg border px-3 py-2 text-sm";
+  const noteBackButtonClass = isDarkNoteTheme
+    ? "no-print fixed left-4 top-4 z-[60] rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-base leading-none text-slate-100 shadow-sm hover:bg-slate-800"
+    : "no-print fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm";
+  const notePanelClass = isDarkNoteTheme
+    ? "absolute right-0 top-11 z-50 w-52 rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
+    : "absolute right-0 top-11 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg";
+  const noteSidePanelClass = isDarkNoteTheme
+    ? "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
+    : "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg";
+  const noteSidePageButtonClass = isDarkNoteTheme
+    ? "w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-left text-sm text-slate-100 hover:bg-slate-700"
+    : "w-full rounded-lg border bg-gray-50 p-2 text-left text-sm hover:bg-gray-100";
+
   const noteObjectToolbarControls = (
     <>
       <div className="relative">
@@ -788,7 +833,7 @@ function addTextBox() {
           className={
             showAddMenu
               ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-              : "rounded-lg border px-3 py-1 text-sm"
+              : noteToolbarButtonClass
           }
           onClick={() => setShowAddMenu((current) => !current)}
         >
@@ -796,10 +841,10 @@ function addTextBox() {
         </button>
 
         {showAddMenu && (
-          <div className="absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg">
+          <div className={noteToolbarMenuClass}>
             <button
               type="button"
-              className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+              className={noteToolbarMenuItemClass}
               onClick={() => {
                 addTextBox();
                 setShowAddMenu(false);
@@ -808,7 +853,7 @@ function addTextBox() {
               Textbox
             </button>
 
-            <label className="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50">
+            <label className={`block cursor-pointer ${noteToolbarMenuItemClass}`}>
               Image
               <input
                 type="file"
@@ -848,14 +893,14 @@ function addTextBox() {
 
             <button
               type="button"
-              className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+              className={noteToolbarMenuItemClass}
               onClick={() => setShowStickerPicker((current) => !current)}
             >
               Stickers
             </button>
 
             <select
-              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+              className={noteToolbarSelectClass}
               defaultValue=""
               onChange={(event) => {
                 const value = event.target.value as
@@ -881,12 +926,12 @@ function addTextBox() {
             </select>
 
             {showStickerPicker && (
-              <div className="mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2">
+              <div className={noteStickerGridClass}>
                 {stickerOptions.map((sticker) => (
                   <button
                     key={sticker.src}
                     type="button"
-                    className="rounded-lg border bg-white p-1 text-left hover:bg-gray-100"
+                    className={noteStickerButtonClass}
                     onClick={() => {
                       addSticker(sticker.src);
                       setShowStickerPicker(false);
@@ -906,35 +951,92 @@ function addTextBox() {
         )}
       </div>
 
-      <button
-        type="button"
-        className={
-          isDrawingMode
-            ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-            : "rounded-lg border px-3 py-1 text-sm"
-        }
-        onClick={() => {
-          if (isDrawingMode) {
-            setDrawingTool((current) =>
-              current === "draw" ? "erase" : "draw"
-            );
-          } else {
-            setIsDrawingMode(true);
-            setDrawingTool("draw");
+      <div className="relative">
+        <button
+          type="button"
+          className={
+            isDrawingMode
+              ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+              : noteToolbarButtonClass
           }
-          setIsObjectSelectionMode(false);
-          setSelectedObjectIds([]);
-        }}
-      >
-        {isDrawingMode && drawingTool === "erase" ? "Erase" : "Draw"}
-      </button>
+          onClick={() => setShowDrawMenu((current) => !current)}
+        >
+          {isDrawingMode
+            ? drawingTool === "erase"
+              ? "Eraser"
+              : `Pencil ${drawingStrokeWidth}px`
+            : "Draw"}
+        </button>
+
+        {showDrawMenu && (
+          <div className={noteToolbarMenuClass}>
+            <button
+              type="button"
+              className={
+                drawingTool === "draw" && isDrawingMode
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
+              onClick={() => {
+                setIsDrawingMode(true);
+                setDrawingTool("draw");
+                setIsObjectSelectionMode(false);
+                setSelectedObjectIds([]);
+              }}
+            >
+              Pencil
+            </button>
+
+            <button
+              type="button"
+              className={
+                drawingTool === "erase" && isDrawingMode
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
+              onClick={() => {
+                setIsDrawingMode(true);
+                setDrawingTool("erase");
+                setIsObjectSelectionMode(false);
+                setSelectedObjectIds([]);
+              }}
+            >
+              Eraser
+            </button>
+
+            <label
+              className={
+                isDarkNoteTheme
+                  ? "mt-2 block rounded-lg border border-slate-700 bg-slate-800 p-3 text-xs text-slate-100"
+                  : "mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700"
+              }
+            >
+              Pencil thickness: {drawingStrokeWidth}px
+              <input
+                type="range"
+                min="2"
+                max="16"
+                value={drawingStrokeWidth}
+                className="mt-2 w-full"
+                onChange={(event) => {
+                  setDrawingStrokeWidth(Number(event.target.value));
+                  setIsDrawingMode(true);
+                  setDrawingTool("draw");
+                  setIsObjectSelectionMode(false);
+                  setSelectedObjectIds([]);
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </div>
 
       <button
         type="button"
         className={
           isObjectSelectionMode
             ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-            : "rounded-lg border px-3 py-1 text-sm"
+            : noteToolbarButtonClass
         }
         onClick={() => {
           setIsObjectSelectionMode((current) => !current);
@@ -950,15 +1052,25 @@ function addTextBox() {
   const thumbnailScale = 0.14;
   const thumbnailWidth = pageWidth * thumbnailScale;
   const thumbnailHeight = pageHeight * thumbnailScale;
-  const thumbnailBackgroundClass = {
-    plain: "bg-white",
-    lined:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:100%_32px]",
-    grid:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:32px_32px]",
-    dots:
-      "bg-white [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
-  }[template];
+  const thumbnailBackgroundClass = isDarkNoteTheme
+    ? {
+        plain: "border-slate-700 bg-[#111827]",
+        lined:
+          "border-slate-700 bg-[#111827] [background-image:linear-gradient(#374151_1px,transparent_1px)] [background-position:0_6px] [background-size:100%_32px]",
+        grid:
+          "border-slate-700 bg-[#111827] [background-image:linear-gradient(#374151_1px,transparent_1px),linear-gradient(90deg,#374151_1px,transparent_1px)] [background-position:0_6px] [background-size:32px_32px]",
+        dots:
+          "border-slate-700 bg-[#111827] [background-image:radial-gradient(#4b5563_1px,transparent_1px)] [background-size:20px_20px]",
+      }[template]
+    : {
+        plain: "border-gray-200 bg-[#ffffff]",
+        lined:
+          "border-gray-200 bg-[#ffffff] [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:100%_32px]",
+        grid:
+          "border-gray-200 bg-[#ffffff] [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:32px_32px]",
+        dots:
+          "border-gray-200 bg-[#ffffff] [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
+      }[template];
 
   function renderPagePreview(pageIndex: number) {
     const pageTop = pageIndex * pageHeight;
@@ -1037,24 +1149,24 @@ function addTextBox() {
   }
 
   return (
-    <main ref={scrollContainerRef} className="h-screen overflow-auto bg-gray-50">
+    <main ref={scrollContainerRef} className={notePageClass}>
       <Link
         href={`/subjects/${subjectId}`}
-        className="no-print fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm"
+        className={noteBackButtonClass}
         aria-label="Back"
       >
         ←
       </Link>
 
-      <header className="no-print flex items-center justify-between border-b bg-white px-16 py-3">
-        <h1 className="text-xl font-bold text-gray-950">
+      <header className={noteHeaderClass}>
+        <h1 className={isDarkNoteTheme ? "text-xl font-bold text-slate-100" : "text-xl font-bold text-gray-950"}>
           {note.title}
         </h1>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded-lg border px-3 py-2 text-sm"
+            className={noteTopButtonClass}
             onClick={() => setShowNoteMenu((current) => !current)}
             title="More"
           >
@@ -1068,7 +1180,7 @@ function addTextBox() {
           <div className="relative">
             <button
               type="button"
-              className="rounded-lg border px-3 py-2 text-sm"
+              className={noteTopButtonClass}
               onClick={() => setShowPagePanel((current) => !current)}
               title="Pages"
             >
@@ -1076,8 +1188,8 @@ function addTextBox() {
             </button>
 
             {showNoteMenu && (
-              <div className="absolute right-0 top-11 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg">
-                <p className="mb-2 text-xs font-semibold text-gray-500">
+              <div className={notePanelClass}>
+                <p className={isDarkNoteTheme ? "mb-2 text-xs font-semibold text-slate-400" : "mb-2 text-xs font-semibold text-gray-500"}>
                   Note Template
                 </p>
 
@@ -1090,7 +1202,9 @@ function addTextBox() {
                         className={
                           template === item
                             ? "rounded-lg bg-black px-2 py-1 text-xs capitalize text-white"
-                            : "rounded-lg border px-2 py-1 text-xs capitalize"
+                            : isDarkNoteTheme
+                              ? "rounded-lg border border-slate-700 px-2 py-1 text-xs capitalize text-slate-100 hover:bg-slate-800"
+                              : "rounded-lg border px-2 py-1 text-xs capitalize"
                         }
                         onClick={() => handleChangeTemplate(item)}
                       >
@@ -1102,7 +1216,7 @@ function addTextBox() {
 
                 <button
                   type="button"
-                  className="mt-3 w-full rounded-lg border px-3 py-2 text-left text-sm"
+                  className={isDarkNoteTheme ? "mt-3 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800" : "mt-3 w-full rounded-lg border px-3 py-2 text-left text-sm"}
                   onClick={async () => {
                     if (navigator.share) {
                       await navigator.share({ title: note.title, text: content });
@@ -1117,7 +1231,7 @@ function addTextBox() {
 
                 <button
                   type="button"
-                  className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm"
+                  className={isDarkNoteTheme ? "mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800" : "mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm"}
                   onClick={handlePrintNote}
                 >
                   Print note
@@ -1136,17 +1250,17 @@ function addTextBox() {
       </header>
 
       {showPagePanel && (
-        <aside className="no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg">
-          <p className="mb-2 text-xs font-semibold text-gray-500">Pages</p>
+        <aside className={noteSidePanelClass}>
+          <p className={isDarkNoteTheme ? "mb-2 text-xs font-semibold text-slate-400" : "mb-2 text-xs font-semibold text-gray-500"}>Pages</p>
           <div className="space-y-2">
             {Array.from({ length: pageCount }, (_, index) => (
               <button
                 key={index}
                 type="button"
-                className="w-full rounded-lg border bg-gray-50 p-2 text-left text-sm hover:bg-gray-100"
+                className={noteSidePageButtonClass}
                 onClick={() => scrollToPage(index)}
               >
-                <span className="mb-1 block text-xs font-semibold text-gray-600">
+                <span className={isDarkNoteTheme ? "mb-1 block text-xs font-semibold text-slate-300" : "mb-1 block text-xs font-semibold text-gray-600"}>
                   Page {index + 1}
                 </span>
                 {renderPagePreview(index)}
@@ -1323,44 +1437,79 @@ function addTextBox() {
                 {isObjectSelectionMode ? "Done Selecting" : "Select Objects"}
               </button>
 
-              <button
-                type="button"
-                className={
-                  isDrawingMode
-                    ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-                    : "rounded-lg border px-3 py-1 text-sm"
+              <div className="relative">
+                <button
+                  type="button"
+                  className={
+                    isDrawingMode
+                      ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+                      : "rounded-lg border px-3 py-1 text-sm"
                   }
-                  onClick={() => {
-                    if (isDrawingMode) {
-                      setDrawingTool((current) =>
-                        current === "draw" ? "erase" : "draw"
-                      );
-                    } else {
-                      setIsDrawingMode(true);
-                      setDrawingTool("draw");
-                    }
-                    setIsObjectSelectionMode(false);
-                    setSelectedObjectIds([]);
-                  }}
+                  onClick={() => setShowDrawMenu((current) => !current)}
                 >
-                {isDrawingMode && drawingTool === "erase" ? "Erase" : "Draw"}
-              </button>
+                  {isDrawingMode
+                    ? drawingTool === "erase"
+                      ? "Eraser"
+                      : `Pencil ${drawingStrokeWidth}px`
+                    : "Draw"}
+                </button>
 
-              {isDrawingMode && (
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  Pen Size
-                  <input
-                    type="range"
-                    min="2"
-                    max="16"
-                    value={drawingStrokeWidth}
-                    onChange={(event) =>
-                      setDrawingStrokeWidth(Number(event.target.value))
-                    }
-                  />
-                  <span className="w-6 text-right">{drawingStrokeWidth}</span>
-                </label>
-              )}
+                {showDrawMenu && (
+                  <div className="absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg">
+                    <button
+                      type="button"
+                      className={
+                        drawingTool === "draw" && isDrawingMode
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setIsDrawingMode(true);
+                        setDrawingTool("draw");
+                        setIsObjectSelectionMode(false);
+                        setSelectedObjectIds([]);
+                      }}
+                    >
+                      Pencil
+                    </button>
+
+                    <button
+                      type="button"
+                      className={
+                        drawingTool === "erase" && isDrawingMode
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setIsDrawingMode(true);
+                        setDrawingTool("erase");
+                        setIsObjectSelectionMode(false);
+                        setSelectedObjectIds([]);
+                      }}
+                    >
+                      Eraser
+                    </button>
+
+                    <label className="mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700">
+                      Pencil thickness: {drawingStrokeWidth}px
+                      <input
+                        type="range"
+                        min="2"
+                        max="16"
+                        value={drawingStrokeWidth}
+                        className="mt-2 w-full"
+                        onChange={(event) => {
+                          setDrawingStrokeWidth(Number(event.target.value));
+                          setIsDrawingMode(true);
+                          setDrawingTool("draw");
+                          setIsObjectSelectionMode(false);
+                          setSelectedObjectIds([]);
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
 
               <div className="hidden" ref={stickerPickerRef}>
                 <button
@@ -1525,6 +1674,7 @@ function addTextBox() {
             minimumHeight={canvasMinimumHeight}
             pageCount={pageCount}
             pageHeight={pageHeight}
+            theme={data.settings.theme}
           >
             <RichNoteEditor
               content={content}
@@ -1532,6 +1682,7 @@ function addTextBox() {
               minimumHeight={canvasMinimumHeight}
               defaultFontFamily={data.settings.default_font_family}
               defaultFontSize={data.settings.default_font_size}
+              theme={data.settings.theme}
               sharedColor={shapeColor}
               onSharedColorChange={setShapeColor}
               toolbarControls={noteObjectToolbarControls}
@@ -1549,6 +1700,11 @@ function addTextBox() {
             drawingTool={drawingTool}
             drawingColor={shapeColor}
             drawingStrokeWidth={drawingStrokeWidth}
+            theme={data.settings.theme}
+            saveRequestId={saveRequestId}
+            pageWidth={pageWidth}
+            pageHeight={pageHeight}
+            pageCount={pageCount}
           />
         </div>
       </section>

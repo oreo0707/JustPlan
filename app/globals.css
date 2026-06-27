@@ -203,6 +203,7 @@ body {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
+    height: auto !important;
 
     margin: 0 !important;
     padding: 0 !important;
@@ -210,6 +211,23 @@ body {
     background: white !important;
 
     transform: none !important;
+  }
+
+  .print-note-page {
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-after: page !important;
+    page-break-after: always !important;
+  }
+
+  .print-note-page:last-of-type {
+    break-after: auto !important;
+    page-break-after: auto !important;
   }
 
   .print-note-canvas,

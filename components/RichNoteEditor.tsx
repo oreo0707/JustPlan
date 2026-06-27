@@ -21,6 +21,7 @@ type RichNoteEditorProps = {
   minimumHeight?: string;
   defaultFontFamily?: string;
   defaultFontSize?: number;
+  theme?: "light" | "dark";
   sharedColor?: string;
   onSharedColorChange?: (color: string) => void;
   toolbarControls?: ReactNode;
@@ -44,6 +45,7 @@ export function RichNoteEditor({
   minimumHeight,
   defaultFontFamily = "Arial",
   defaultFontSize = 16,
+  theme = "light",
   sharedColor = "#111827",
   onSharedColorChange,
   toolbarControls,
@@ -51,6 +53,18 @@ export function RichNoteEditor({
 }: RichNoteEditorProps) {
   const [fallbackColor, setFallbackColor] = useState(sharedColor);
   const activeColor = sharedColor ?? fallbackColor;
+  const editorTextClass =
+    theme === "dark" ? "text-[#f8fafc] caret-[#f8fafc]" : "text-[#111827]";
+  const isDark = theme === "dark";
+  const toolbarClass = isDark
+    ? "no-print fixed left-[48%] top-4 z-[10000] flex w-max max-w-none -translate-x-1/2 flex-nowrap items-center gap-2 overflow-visible rounded-xl border border-slate-700 bg-slate-900/95 px-4 py-3 text-slate-100 shadow-lg backdrop-blur [&>*]:shrink-0"
+    : "no-print fixed left-[48%] top-4 z-[10000] flex w-max max-w-none -translate-x-1/2 flex-nowrap items-center gap-2 overflow-visible rounded-xl border bg-white/95 px-4 py-3 shadow-lg backdrop-blur [&>*]:shrink-0";
+  const toolbarButtonClass = isDark
+    ? "rounded-lg border border-slate-600 bg-slate-800 px-3 py-1 text-sm text-slate-100 hover:bg-slate-700"
+    : "rounded-lg border px-3 py-1 text-sm";
+  const toolbarSelectClass = isDark
+    ? "rounded-lg border border-slate-600 bg-slate-800 px-3 py-1 text-sm text-slate-100"
+    : "rounded-lg border px-3 py-1 text-sm";
 
   function updateSharedColor(color: string) {
     setFallbackColor(color);
@@ -78,7 +92,7 @@ export function RichNoteEditor({
     editorProps: {
       attributes: {
         class:
-          "min-h-[calc(100vh-260px)] w-full bg-transparent p-0 text-gray-950 outline-none leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:py-0 [&_p]:leading-[32px] [&_li]:min-h-8 [&_li]:py-0 [&_li]:leading-[32px] [&_span]:align-baseline [&_span]:leading-none [&_mark]:align-baseline [&_mark]:leading-none [&_strong]:leading-none [&_u]:leading-none",
+          `min-h-[calc(100vh-260px)] w-full bg-transparent p-0 ${editorTextClass} outline-none leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:py-0 [&_p]:leading-[32px] [&_li]:min-h-8 [&_li]:py-0 [&_li]:leading-[32px] [&_span]:align-baseline [&_span]:leading-none [&_mark]:align-baseline [&_mark]:leading-none [&_strong]:leading-none [&_u]:leading-none`,
         style: `font-family: ${defaultFontFamily}; font-size: ${defaultFontSize}px;`,
       },
     },
@@ -103,7 +117,13 @@ export function RichNoteEditor({
 
   if (!editor) {
     return (
-      <div className="rounded-xl border bg-white p-4 text-sm text-gray-500">
+      <div
+        className={
+          isDark
+            ? "rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm text-slate-300"
+            : "rounded-xl border bg-white p-4 text-sm text-gray-500"
+        }
+      >
         Loading editor...
       </div>
     );
@@ -111,10 +131,10 @@ export function RichNoteEditor({
 
   const activeEditor = editor;
   const toolbar = (
-    <div className="no-print fixed left-[48%] top-4 z-[10000] flex w-max max-w-none -translate-x-1/2 flex-nowrap items-center gap-2 overflow-visible rounded-xl border bg-white/95 px-4 py-3 shadow-lg backdrop-blur [&>*]:shrink-0">
+    <div className={toolbarClass}>
       <button
         type="button"
-        className="rounded-lg border px-3 py-1 text-sm font-bold"
+        className={`${toolbarButtonClass} font-bold`}
         onClick={() => activeEditor.chain().focus().toggleBold().run()}
       >
         B
@@ -122,7 +142,7 @@ export function RichNoteEditor({
 
       <button
         type="button"
-        className="rounded-lg border px-3 py-1 text-sm underline"
+        className={`${toolbarButtonClass} underline`}
         onClick={() => activeEditor.chain().focus().toggleUnderline().run()}
       >
         U
@@ -130,7 +150,7 @@ export function RichNoteEditor({
 
       <button
         type="button"
-        className="rounded-lg border px-3 py-1 text-sm"
+        className={toolbarButtonClass}
         onClick={() =>
           activeEditor
             .chain()
@@ -145,7 +165,7 @@ export function RichNoteEditor({
       {toolbarControls}
 
       <select
-        className="rounded-lg border px-3 py-1 text-sm"
+        className={toolbarSelectClass}
         defaultValue=""
         onChange={(event) =>
           activeEditor
@@ -166,7 +186,7 @@ export function RichNoteEditor({
       </select>
 
       <select
-        className="rounded-lg border px-3 py-1 text-sm"
+        className={toolbarSelectClass}
         defaultValue=""
         onChange={(event) =>
           activeEditor.chain().focus().setFontSize(event.target.value).run()
@@ -186,11 +206,12 @@ export function RichNoteEditor({
         type="color"
         title="Colour"
         value={activeColor}
-        onChange={(event) => {
-          updateSharedColor(event.target.value);
-          activeEditor.chain().focus().setColor(event.target.value).run();
-        }}
-        className="h-8 w-10 rounded border"
+        onChange={(event) => updateSharedColor(event.target.value)}
+        className={
+          isDark
+            ? "h-8 w-10 rounded border border-slate-600 bg-slate-800"
+            : "h-8 w-10 rounded border"
+        }
       />
     </div>
   );

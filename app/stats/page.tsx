@@ -374,7 +374,7 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
         </div>
 
         <nav
-          className="mt-8 flex gap-2 overflow-x-auto border-b border-violet-200 px-2"
+          className="mt-8 flex flex-wrap gap-2 border-b border-violet-200 px-2"
           aria-label="Statistics views"
         >
           {statistics.map((statistic, index) => {
@@ -512,11 +512,8 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-8 overflow-x-auto pb-2">
-                    <div
-                      className="relative h-80"
-                      style={{ minWidth: `${Math.max(620, workload.length * 112)}px` }}
-                    >
+                  <div className="mt-8 pb-2">
+                    <div className="relative h-80 w-full">
                       <div className="absolute inset-x-0 top-0 h-64">
                         {ticks.map((tick) => (
                           <div
@@ -823,7 +820,7 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
                             No tasks in this category.
                           </p>
                         ) : (
-                          <div className="max-h-64 space-y-2 overflow-y-auto pt-3">
+                          <div className="space-y-2 pt-3">
                             {bucket.tasks.map((task) => (
                               <div
                                 key={`${task.subjectName}-${task.id}`}
