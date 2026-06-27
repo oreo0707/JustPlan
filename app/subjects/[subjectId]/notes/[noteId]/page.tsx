@@ -972,6 +972,19 @@ function addTextBox() {
           <div className={noteToolbarMenuClass}>
             <button
               type="button"
+              className={!isDrawingMode ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white" : noteToolbarMenuItemClass}
+              onClick={() => {
+                setIsDrawingMode(false);
+                setIsObjectSelectionMode(false);
+                setSelectedObjectIds([]);
+                setShowDrawMenu(false);
+              }}
+            >
+              Text
+            </button>
+
+            <button
+              type="button"
               className={
                 drawingTool === "draw" && isDrawingMode
                   ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
@@ -982,6 +995,7 @@ function addTextBox() {
                 setDrawingTool("draw");
                 setIsObjectSelectionMode(false);
                 setSelectedObjectIds([]);
+                setShowDrawMenu(false);
               }}
             >
               Pencil
@@ -999,6 +1013,7 @@ function addTextBox() {
                 setDrawingTool("erase");
                 setIsObjectSelectionMode(false);
                 setSelectedObjectIds([]);
+                setShowDrawMenu(false);
               }}
             >
               Eraser
@@ -1459,6 +1474,23 @@ function addTextBox() {
                     <button
                       type="button"
                       className={
+                        !isDrawingMode
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setIsDrawingMode(false);
+                        setIsObjectSelectionMode(false);
+                        setSelectedObjectIds([]);
+                        setShowDrawMenu(false);
+                      }}
+                    >
+                      Text
+                    </button>
+
+                    <button
+                      type="button"
+                      className={
                         drawingTool === "draw" && isDrawingMode
                           ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
                           : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
@@ -1468,6 +1500,7 @@ function addTextBox() {
                         setDrawingTool("draw");
                         setIsObjectSelectionMode(false);
                         setSelectedObjectIds([]);
+                        setShowDrawMenu(false);
                       }}
                     >
                       Pencil
@@ -1485,6 +1518,7 @@ function addTextBox() {
                         setDrawingTool("erase");
                         setIsObjectSelectionMode(false);
                         setSelectedObjectIds([]);
+                        setShowDrawMenu(false);
                       }}
                     >
                       Eraser
