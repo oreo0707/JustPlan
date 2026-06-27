@@ -12,6 +12,7 @@ type NoteObjectLayerProps = {
   onChangeObjects: (objects: NoteObject[]) => void;
   selectionMode: boolean;
   drawingMode: boolean;
+  drawingTool: "draw" | "erase";
   drawingColor: string;
   drawingStrokeWidth: number;
 };
@@ -84,6 +85,123 @@ function getDrawingPath(points: DrawingPoint[]) {
       index === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
     )
     .join(" ");
+}
+
+function getDistanceToSegment(
+  point: DrawingPoint,
+  segmentStart: DrawingPoint,
+  segmentEnd: DrawingPoint
+) {
+  const segmentX = segmentEnd.x - segmentStart.x;
+  const segmentY = segmentEnd.y - segmentStart.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    return Math.hypot(point.x - segmentStart.x, point.y - segmentStart.y);
+  }
+
+  const progress = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - segmentStart.x) * segmentX +
+        (point.y - segmentStart.y) * segmentY) /
+        segmentLengthSquared
+    )
+  );
+  const closestX = segmentStart.x + progress * segmentX;
+  const closestY = segmentStart.y + progress * segmentY;
+
+  return Math.hypot(point.x - closestX, point.y - closestY);
+}
+
+function createDrawingFromAbsolutePoints(
+  source: NoteObject,
+  absolutePoints: DrawingPoint[],
+  id: string
+) {
+  const padding = Math.max(6, source.strokeWidth ?? 4);
+  const xs = absolutePoints.map((point) => point.x);
+  const ys = absolutePoints.map((point) => point.y);
+  const left = Math.max(0, Math.min(...xs) - padding);
+  const top = Math.max(0, Math.min(...ys) - padding);
+  const right = Math.max(...xs) + padding;
+  const bottom = Math.max(...ys) + padding;
+
+  return {
+    ...source,
+    id,
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+    points: absolutePoints.map((point) => ({
+      x: point.x - left,
+      y: point.y - top,
+    })),
+  };
+}
+
+function eraseDrawingAtPoint(object: NoteObject, point: DrawingPoint) {
+  if (object.type !== "drawing" || !object.points || object.points.length < 2) {
+    return { changed: false, objects: [object] };
+  }
+
+  const hitRadius = Math.max(12, (object.strokeWidth ?? 4) + 8);
+  const absolutePoints = object.points.map((drawingPoint) => ({
+    x: object.x + drawingPoint.x,
+    y: object.y + drawingPoint.y,
+  }));
+  const erasedPoints = absolutePoints.map(
+    (drawingPoint) =>
+      Math.hypot(point.x - drawingPoint.x, point.y - drawingPoint.y) <=
+      hitRadius
+  );
+
+  for (let index = 1; index < absolutePoints.length; index += 1) {
+    if (
+      getDistanceToSegment(point, absolutePoints[index - 1], absolutePoints[index]) <=
+      hitRadius
+    ) {
+      erasedPoints[index - 1] = true;
+      erasedPoints[index] = true;
+    }
+  }
+
+  if (!erasedPoints.some(Boolean)) {
+    return { changed: false, objects: [object] };
+  }
+
+  const keptSegments: DrawingPoint[][] = [];
+  let currentSegment: DrawingPoint[] = [];
+
+  absolutePoints.forEach((drawingPoint, index) => {
+    if (erasedPoints[index]) {
+      if (currentSegment.length >= 2) {
+        keptSegments.push(currentSegment);
+      }
+
+      currentSegment = [];
+      return;
+    }
+
+    currentSegment.push(drawingPoint);
+  });
+
+  if (currentSegment.length >= 2) {
+    keptSegments.push(currentSegment);
+  }
+
+  return {
+    changed: true,
+    objects: keptSegments.map((segment, index) =>
+      createDrawingFromAbsolutePoints(
+        object,
+        segment,
+        index === 0 ? object.id : crypto.randomUUID()
+      )
+    ),
+  };
 }
 
 function boxesIntersect(a: SelectionBox, b: SelectionBox) {
@@ -163,6 +281,7 @@ export function NoteObjectLayer({
   onChangeObjects,
   selectionMode,
   drawingMode,
+  drawingTool,
   drawingColor,
   drawingStrokeWidth,
 }: NoteObjectLayerProps) {
@@ -494,14 +613,86 @@ export function NoteObjectLayer({
     window.addEventListener("pointerup", handleUp);
   }
 
+  function startErasing(event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const layerBounds = layerRef.current?.getBoundingClientRect();
+    if (!layerBounds) return;
+    const erasingElement = event.currentTarget;
+    const pointerId = event.pointerId;
+    let workingObjects = objects;
+
+    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
+      x: pointerEvent.clientX - layerBounds.left,
+      y: pointerEvent.clientY - layerBounds.top,
+    });
+
+    function eraseAt(point: DrawingPoint) {
+      let changed = false;
+      const nextObjects = workingObjects.flatMap((object) => {
+        if (object.type !== "drawing") return [object];
+
+        const result = eraseDrawingAtPoint(object, point);
+        if (result.changed) changed = true;
+
+        return result.objects;
+      });
+
+      if (changed) {
+        workingObjects = nextObjects;
+        onChangeObjects(nextObjects);
+        onSelectionChange([]);
+      }
+    }
+
+    eraseAt(getPoint(event));
+
+    function handleMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+
+      moveEvent.preventDefault();
+
+      const moveEvents =
+        typeof moveEvent.getCoalescedEvents === "function"
+          ? moveEvent.getCoalescedEvents()
+          : [moveEvent];
+
+      moveEvents.forEach((pointerEvent) => eraseAt(getPoint(pointerEvent)));
+    }
+
+    function finishErasing(finishEvent: PointerEvent) {
+      if (finishEvent.pointerId !== pointerId) return;
+
+      finishEvent.preventDefault();
+      erasingElement.removeEventListener("pointermove", handleMove);
+      erasingElement.removeEventListener("pointerup", finishErasing);
+      erasingElement.removeEventListener("pointercancel", finishErasing);
+      erasingElement.removeEventListener("lostpointercapture", finishErasing);
+
+      if (erasingElement.hasPointerCapture(pointerId)) {
+        erasingElement.releasePointerCapture(pointerId);
+      }
+    }
+
+    erasingElement.addEventListener("pointermove", handleMove, { passive: false });
+    erasingElement.addEventListener("pointerup", finishErasing);
+    erasingElement.addEventListener("pointercancel", finishErasing);
+    erasingElement.addEventListener("lostpointercapture", finishErasing);
+  }
+
   function startDrawing(event: React.PointerEvent<HTMLDivElement>) {
     if (!drawingMode || event.target !== event.currentTarget) return;
 
     event.preventDefault();
     event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
+    const drawingElement = event.currentTarget;
+    const pointerId = event.pointerId;
 
     const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
       x: pointerEvent.clientX - layerBounds.left,
@@ -513,21 +704,42 @@ export function NoteObjectLayer({
     setActiveDrawingPoints(points);
     onSelectionChange([]);
 
-    function handleMove(moveEvent: PointerEvent) {
-      const nextPoint = getPoint(moveEvent);
+    function addPoint(nextPoint: DrawingPoint) {
       const lastPoint = points[points.length - 1];
       const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
 
-      if (distance < 2) return;
+      if (distance < 1.25) return;
 
       points = [...points, nextPoint];
+    }
+
+    function handleMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+
+      moveEvent.preventDefault();
+
+      const moveEvents =
+        typeof moveEvent.getCoalescedEvents === "function"
+          ? moveEvent.getCoalescedEvents()
+          : [moveEvent];
+
+      moveEvents.forEach((pointerEvent) => addPoint(getPoint(pointerEvent)));
       setActiveDrawingPoints(points);
     }
 
-    function handleUp() {
+    function finishDrawing(finishEvent: PointerEvent) {
+      if (finishEvent.pointerId !== pointerId) return;
+
+      finishEvent.preventDefault();
       setActiveDrawingPoints([]);
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
+      drawingElement.removeEventListener("pointermove", handleMove);
+      drawingElement.removeEventListener("pointerup", finishDrawing);
+      drawingElement.removeEventListener("pointercancel", finishDrawing);
+      drawingElement.removeEventListener("lostpointercapture", finishDrawing);
+
+      if (drawingElement.hasPointerCapture(pointerId)) {
+        drawingElement.releasePointerCapture(pointerId);
+      }
 
       if (points.length < 2) return;
 
@@ -560,8 +772,10 @@ export function NoteObjectLayer({
       onSelectionChange([newDrawing.id]);
     }
 
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
+    drawingElement.addEventListener("pointermove", handleMove, { passive: false });
+    drawingElement.addEventListener("pointerup", finishDrawing);
+    drawingElement.addEventListener("pointercancel", finishDrawing);
+    drawingElement.addEventListener("lostpointercapture", finishDrawing);
   }
 
   function startLineEndpointDrag(
@@ -713,12 +927,25 @@ export function NoteObjectLayer({
       ref={layerRef}
       className={
         selectionMode || drawingMode
-          ? "pointer-events-auto absolute inset-0 z-20 cursor-crosshair"
+          ? `pointer-events-auto absolute inset-0 z-20 touch-none select-none ${
+              drawingMode && drawingTool === "erase"
+                ? "cursor-cell"
+                : "cursor-crosshair"
+            }`
           : "pointer-events-none absolute inset-0 z-20"
       }
+      style={{
+        touchAction: drawingMode || selectionMode ? "none" : "auto",
+        WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
+        userSelect: drawingMode || selectionMode ? "none" : undefined,
+      }}
       onPointerDown={(event) => {
         if (drawingMode) {
-          startDrawing(event);
+          if (drawingTool === "erase") {
+            startErasing(event);
+          } else {
+            startDrawing(event);
+          }
           return;
         }
 

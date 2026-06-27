@@ -18,9 +18,9 @@ export function PaperBackground({
   const pageBackgroundClass = {
     plain: "bg-white",
     lined:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:100%_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:100%_32px]",
     grid:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:32px_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:32px_32px]",
     dots:
       "bg-white [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
   }[template];

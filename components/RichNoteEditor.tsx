@@ -78,7 +78,7 @@ export function RichNoteEditor({
     editorProps: {
       attributes: {
         class:
-          "min-h-[calc(100vh-260px)] w-full bg-transparent p-0 text-gray-950 outline-none leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:py-0 [&_p]:leading-[32px] [&_li]:min-h-8 [&_li]:py-0 [&_li]:leading-[32px] [&_span]:inline-block [&_span]:align-bottom [&_span]:leading-none [&_mark]:inline-block [&_mark]:align-bottom [&_mark]:leading-none [&_strong]:leading-none [&_u]:leading-none",
+          "min-h-[calc(100vh-260px)] w-full bg-transparent p-0 text-gray-950 outline-none leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:py-0 [&_p]:leading-[32px] [&_li]:min-h-8 [&_li]:py-0 [&_li]:leading-[32px] [&_span]:align-baseline [&_span]:leading-none [&_mark]:align-baseline [&_mark]:leading-none [&_strong]:leading-none [&_u]:leading-none",
         style: `font-family: ${defaultFontFamily}; font-size: ${defaultFontSize}px;`,
       },
     },
@@ -111,7 +111,7 @@ export function RichNoteEditor({
 
   const activeEditor = editor;
   const toolbar = (
-    <div className="fixed left-1/2 top-4 z-[9999] flex max-w-[calc(100vw-8rem)] -translate-x-1/2 flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap rounded-xl border bg-white/95 p-2 shadow-sm backdrop-blur [&>*]:shrink-0">
+    <div className="no-print fixed left-[47%] top-4 z-[10000] flex w-max max-w-[calc(100vw-3rem)] -translate-x-1/2 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-visible rounded-xl border bg-white/95 px-4 py-3 shadow-lg backdrop-blur [&>*]:shrink-0">
       <button
         type="button"
         className="rounded-lg border px-3 py-1 text-sm font-bold"
@@ -196,13 +196,13 @@ export function RichNoteEditor({
   );
 
   return (
-    <div className="min-h-full">
+    <div className="min-h-full overflow-visible">
       {typeof document === "undefined"
         ? toolbar
         : createPortal(toolbar, document.body)}
 
       <div
-        className="note-editor-surface"
+        className="note-editor-surface overflow-visible"
         style={{ minHeight: minimumHeight }}
       >
         <EditorContent editor={activeEditor} />

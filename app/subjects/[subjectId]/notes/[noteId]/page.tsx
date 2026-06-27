@@ -41,6 +41,7 @@ export default function NoteEditorPage() {
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [drawingTool, setDrawingTool] = useState<"draw" | "erase">("draw");
   const [shapeColor, setShapeColor] = useState("#111827");
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(4);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -51,7 +52,8 @@ export default function NoteEditorPage() {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
-  const pageHeight = 960;
+  const pageWidth = 794;
+  const pageHeight = 1123;
 
   const [cursorStyle, setCursorStyle] = useState<
     "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star"
@@ -137,6 +139,20 @@ export default function NoteEditorPage() {
 
     setData(updatedData);
   }
+
+  function handlePrintNote() {
+    setSelectedObjectIds([]);
+    setShowNoteMenu(false);
+    setShowPagePanel(false);
+    setShowAddMenu(false);
+    setShowStickerPicker(false);
+    setIsObjectSelectionMode(false);
+    setIsDrawingMode(false);
+
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  }
   
 
   function handleChangeTemplate(newTemplate: NoteTemplate) {
@@ -172,7 +188,7 @@ export default function NoteEditorPage() {
   }
 
   function getCenteredObjectPosition(width: number, height: number) {
-    const availableWidth = canvasRef.current?.clientWidth ?? 900;
+    const availableWidth = canvasRef.current?.clientWidth ?? pageWidth;
     const pageTop = getCurrentPageIndex() * pageHeight;
 
     return {
@@ -337,7 +353,7 @@ function addTextBox() {
     usedBottom > 0 ? Math.max(2, Math.ceil(usedBottom / pageHeight) + 1) : 1;
   const canvasPixelHeight = pageCount * pageHeight;
   const canvasMinimumHeight = `${canvasPixelHeight}px`;
-  const canvasWidth = `max(100%, ${Math.ceil(objectExtents.right + 120)}px)`;
+  const canvasWidth = `${pageWidth}px`;
 
   const stickerOptions = [
     {
@@ -898,12 +914,19 @@ function addTextBox() {
             : "rounded-lg border px-3 py-1 text-sm"
         }
         onClick={() => {
-          setIsDrawingMode((current) => !current);
+          if (isDrawingMode) {
+            setDrawingTool((current) =>
+              current === "draw" ? "erase" : "draw"
+            );
+          } else {
+            setIsDrawingMode(true);
+            setDrawingTool("draw");
+          }
           setIsObjectSelectionMode(false);
           setSelectedObjectIds([]);
         }}
       >
-        Draw
+        {isDrawingMode && drawingTool === "erase" ? "Erase" : "Draw"}
       </button>
 
       <button
@@ -925,14 +948,14 @@ function addTextBox() {
   );
 
   const thumbnailScale = 0.14;
-  const thumbnailWidth = 900 * thumbnailScale;
+  const thumbnailWidth = pageWidth * thumbnailScale;
   const thumbnailHeight = pageHeight * thumbnailScale;
   const thumbnailBackgroundClass = {
     plain: "bg-white",
     lined:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:100%_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:100%_32px]",
     grid:
-      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:32px_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_6px] [background-size:32px_32px]",
     dots:
       "bg-white [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
   }[template];
@@ -1017,13 +1040,13 @@ function addTextBox() {
     <main ref={scrollContainerRef} className="h-screen overflow-auto bg-gray-50">
       <Link
         href={`/subjects/${subjectId}`}
-        className="fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm"
+        className="no-print fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm"
         aria-label="Back"
       >
         ←
       </Link>
 
-      <header className="flex items-center justify-between border-b bg-white px-16 py-3">
+      <header className="no-print flex items-center justify-between border-b bg-white px-16 py-3">
         <h1 className="text-xl font-bold text-gray-950">
           {note.title}
         </h1>
@@ -1033,7 +1056,7 @@ function addTextBox() {
             type="button"
             className="rounded-lg border px-3 py-2 text-sm"
             onClick={() => setShowNoteMenu((current) => !current)}
-            title="Pages"
+            title="More"
           >
             <span
               aria-hidden="true"
@@ -1047,7 +1070,7 @@ function addTextBox() {
               type="button"
               className="rounded-lg border px-3 py-2 text-sm"
               onClick={() => setShowPagePanel((current) => !current)}
-              title="More"
+              title="Pages"
             >
               ...
             </button>
@@ -1095,7 +1118,7 @@ function addTextBox() {
                 <button
                   type="button"
                   className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm"
-                  onClick={() => window.print()}
+                  onClick={handlePrintNote}
                 >
                   Print note
                 </button>
@@ -1113,7 +1136,7 @@ function addTextBox() {
       </header>
 
       {showPagePanel && (
-        <aside className="fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg">
+        <aside className="no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg">
           <p className="mb-2 text-xs font-semibold text-gray-500">Pages</p>
           <div className="space-y-2">
             {Array.from({ length: pageCount }, (_, index) => (
@@ -1133,7 +1156,7 @@ function addTextBox() {
         </aside>
       )}
 
-      <section className="flex min-h-[calc(100vh-89px)] flex-col p-6">
+      <section className="print-note-section flex min-h-[calc(100vh-89px)] flex-col items-center p-6">
         <div className="mb-4 flex shrink-0 items-center justify-between">
           <div>
             <p className="hidden text-sm font-medium text-gray-700">
@@ -1306,14 +1329,21 @@ function addTextBox() {
                   isDrawingMode
                     ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
                     : "rounded-lg border px-3 py-1 text-sm"
-                }
-                onClick={() => {
-                  setIsDrawingMode((current) => !current);
-                  setIsObjectSelectionMode(false);
-                  setSelectedObjectIds([]);
-                }}
-              >
-                {isDrawingMode ? "Done Drawing" : "Draw"}
+                  }
+                  onClick={() => {
+                    if (isDrawingMode) {
+                      setDrawingTool((current) =>
+                        current === "draw" ? "erase" : "draw"
+                      );
+                    } else {
+                      setIsDrawingMode(true);
+                      setDrawingTool("draw");
+                    }
+                    setIsObjectSelectionMode(false);
+                    setSelectedObjectIds([]);
+                  }}
+                >
+                {isDrawingMode && drawingTool === "erase" ? "Erase" : "Draw"}
               </button>
 
               {isDrawingMode && (
@@ -1482,7 +1512,7 @@ function addTextBox() {
 
         <div
           ref={canvasRef}
-          className="relative"
+          className="print-note-canvas relative mx-auto"
           style={{ minHeight: canvasMinimumHeight, width: canvasWidth }}
           onPointerDown={() => {
             if (!isObjectSelectionMode && !isDrawingMode) {
@@ -1516,6 +1546,7 @@ function addTextBox() {
             onChangeObjects={handleChangeObjects}
             selectionMode={isObjectSelectionMode}
             drawingMode={isDrawingMode}
+            drawingTool={drawingTool}
             drawingColor={shapeColor}
             drawingStrokeWidth={drawingStrokeWidth}
           />
@@ -1524,4 +1555,3 @@ function addTextBox() {
     </main>
   );
 }
-
