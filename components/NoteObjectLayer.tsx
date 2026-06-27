@@ -769,7 +769,7 @@ export function NoteObjectLayer({
       };
 
       onChangeObjects([...objects, newDrawing]);
-      onSelectionChange([newDrawing.id]);
+      onSelectionChange([]);
     }
 
     drawingElement.addEventListener("pointermove", handleMove, { passive: false });
@@ -966,7 +966,7 @@ export function NoteObjectLayer({
       )}
 
       {objects.map((object) => {
-        const selected = selectedObjectIds.includes(object.id);
+        const selected = !drawingMode && selectedObjectIds.includes(object.id);
 
         if (object.type === "line") {
           const points = getLinePoints(object);
