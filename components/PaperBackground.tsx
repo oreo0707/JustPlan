@@ -4,29 +4,46 @@ type PaperBackgroundProps = {
   template: NoteTemplate;
   children: React.ReactNode;
   minimumHeight?: string;
+  pageCount?: number;
+  pageHeight?: number;
 };
 
 export function PaperBackground({
   template,
   children,
   minimumHeight,
+  pageCount = 1,
+  pageHeight = 960,
 }: PaperBackgroundProps) {
-  const backgroundClass = {
+  const pageBackgroundClass = {
     plain: "bg-white",
     lined:
-      "bg-white [&_.note-editor-surface]:[background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [&_.note-editor-surface]:[background-position:0_6px] [&_.note-editor-surface]:[background-size:100%_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:100%_32px]",
     grid:
-      "bg-white [&_.note-editor-surface]:[background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [&_.note-editor-surface]:[background-position:0_6px] [&_.note-editor-surface]:[background-size:32px_32px]",
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:32px_32px]",
     dots:
-      "bg-white [&_.note-editor-surface]:[background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [&_.note-editor-surface]:[background-size:20px_20px]",
+      "bg-white [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
   }[template];
 
   return (
     <div
-      className={`min-h-full rounded-xl border p-4 shadow-sm ${backgroundClass}`}
+      className="relative"
       style={{ minHeight: minimumHeight }}
     >
+      {Array.from({ length: pageCount }, (_, index) => (
+        <div
+          key={index}
+          className={`pointer-events-none absolute inset-x-0 rounded-xl border shadow-sm ${pageBackgroundClass}`}
+          style={{
+            top: index * pageHeight,
+            height: pageHeight,
+          }}
+        />
+      ))}
+
+      <div className="relative z-10 p-4">
       {children}
+      </div>
     </div>
   );
 }

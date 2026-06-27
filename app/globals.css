@@ -59,6 +59,15 @@ body {
   color: var(--app-theme-accent);
 }
 
+.app-color-theme .app-theme-today-box {
+  border-color: var(--app-theme-accent) !important;
+}
+
+.app-color-theme .app-theme-today-pill {
+  background-color: var(--app-theme-accent) !important;
+  color: var(--app-theme-surface) !important;
+}
+
 .app-color-theme :is(.bg-black, .bg-blue-600, .bg-violet-600) {
   background-color: var(--app-theme-accent) !important;
 }

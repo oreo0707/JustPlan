@@ -6,6 +6,7 @@ import type { AppData } from "@/lib/types";
 import { defaultData } from "@/lib/default-data";
 import { loadData, saveData } from "@/lib/storage";
 import {
+  addDays,
   getDaysUntil,
   getMonthDays,
   getTodayDateString,
@@ -18,6 +19,7 @@ export default function HomePage() {
   const [data, setData] = useState<AppData>(defaultData);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [scheduleView, setScheduleView] = useState<ScheduleView>("weekly");
+  const [visibleScheduleDate, setVisibleScheduleDate] = useState(() => new Date());
   const [weeklyNote, setWeeklyNote] = useState("");
 
   const today = getTodayDateString();
@@ -83,10 +85,36 @@ export default function HomePage() {
     });
   }
 
+  function getTaskDueDateTooltip(dueDate: string) {
+    return dueDate ? `Due date: ${dueDate}` : "No due date";
+  }
+
   const todayTasks = getTasksForDate(today);
 
-  const weekDays = getWeekDays(new Date());
-  const monthDays = getMonthDays(new Date());
+  function addMonths(date: Date, months: number) {
+    const copy = new Date(date);
+    copy.setMonth(copy.getMonth() + months);
+    return copy;
+  }
+
+  function moveSchedule(direction: -1 | 1) {
+    setVisibleScheduleDate((currentDate) =>
+      scheduleView === "weekly"
+        ? addDays(currentDate, direction * 7)
+        : addMonths(currentDate, direction)
+    );
+  }
+
+  const weekDays = getWeekDays(visibleScheduleDate);
+  const monthDays = getMonthDays(visibleScheduleDate);
+  const monthLeadingBlankCount =
+    monthDays.length > 0
+      ? (new Date(monthDays[0].dateString).getDay() + 6) % 7
+      : 0;
+  const weekDayHeaders = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const scheduleMonthName = visibleScheduleDate.toLocaleDateString("en-US", {
+    month: "long",
+  });
 
   return (
     <AppShell>
@@ -135,25 +163,45 @@ export default function HomePage() {
             </div>
           </div>
 
+          {scheduleView === "monthly" && (
+            <h3 className="mt-5 text-lg font-semibold text-gray-950">
+              {scheduleMonthName}
+            </h3>
+          )}
+
           {scheduleView === "weekly" ? (
             <div className="mt-6 grid grid-cols-4 gap-3">
               {weekDays.map((day) => {
                 const tasks = getTasksForDate(day.dateString);
+                const isToday = day.dateString === today;
 
                 return (
                   <div
                     key={day.dateString}
-                    className="min-h-36 rounded-xl border bg-gray-50 p-3"
+                    className={
+                      isToday
+                        ? "app-theme-today-box min-h-36 rounded-xl border-2 bg-gray-50 p-3 shadow-sm"
+                        : "min-h-36 rounded-xl border bg-gray-50 p-3"
+                    }
                   >
                     <div className="flex items-center justify-between">
                       <p className="font-semibold">{day.label}</p>
-                      <p className="text-sm text-gray-500">{day.dayNumber}</p>
+                      <p
+                        className={
+                          isToday
+                            ? "app-theme-today-pill rounded-full px-2 py-0.5 text-sm font-semibold"
+                            : "text-sm text-gray-500"
+                        }
+                      >
+                        {day.dayNumber}
+                      </p>
                     </div>
 
                     <div className="mt-3 space-y-2">
                       {tasks.map((task) => (
                         <div
                           key={task.id}
+                          title={getTaskDueDateTooltip(task.due_date)}
                           className="rounded-md bg-white px-2 py-1 text-xs shadow-sm"
                         >
                           <p className="font-medium">{task.title}</p>
@@ -177,35 +225,86 @@ export default function HomePage() {
               </div>
             </div>
           ) : (
-            <div className="mt-6 grid grid-cols-7 gap-2">
-              {monthDays.map((day) => {
-                const tasks = getTasksForDate(day.dateString);
-
-                return (
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-7 gap-2">
+                {weekDayHeaders.map((day) => (
                   <div
-                    key={day.dateString}
-                    className="min-h-28 rounded-lg border bg-gray-50 p-2"
+                    key={day}
+                    className="rounded-lg bg-gray-100 px-2 py-2 text-center text-xs font-semibold text-gray-600"
                   >
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold">{day.label}</p>
-                      <p className="text-xs text-gray-500">{day.dayNumber}</p>
-                    </div>
-
-                    <div className="mt-2 space-y-1">
-                      {tasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className="truncate rounded bg-white px-2 py-1 text-xs shadow-sm"
-                        >
-                          {task.title}
-                        </div>
-                      ))}
-                    </div>
+                    {day}
                   </div>
-                );
-              })}
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-2">
+                {Array.from({ length: monthLeadingBlankCount }, (_, index) => (
+                  <div
+                    key={`month-blank-${index}`}
+                    className="min-h-28 rounded-lg border border-dashed border-transparent p-2"
+                  />
+                ))}
+
+                {monthDays.map((day) => {
+                  const tasks = getTasksForDate(day.dateString);
+                  const isToday = day.dateString === today;
+
+                  return (
+                    <div
+                      key={day.dateString}
+                      className={
+                        isToday
+                          ? "app-theme-today-box min-h-28 rounded-lg border-2 bg-gray-50 p-2 shadow-sm"
+                          : "min-h-28 rounded-lg border bg-gray-50 p-2"
+                      }
+                    >
+                      <p
+                        className={
+                          isToday
+                            ? "app-theme-today-pill inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold"
+                            : "text-xs font-semibold text-gray-500"
+                        }
+                      >
+                        {day.dayNumber}
+                      </p>
+
+                      <div className="mt-2 space-y-1">
+                        {tasks.map((task) => (
+                          <div
+                            key={task.id}
+                            title={getTaskDueDateTooltip(task.due_date)}
+                            className="truncate rounded bg-white px-2 py-1 text-xs shadow-sm"
+                          >
+                            {task.title}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
+
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-full border bg-white text-lg text-gray-700 shadow-sm hover:bg-gray-50"
+              aria-label={`Previous ${scheduleView === "weekly" ? "week" : "month"}`}
+              onClick={() => moveSchedule(-1)}
+            >
+              &lt;
+            </button>
+
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-full border bg-white text-lg text-gray-700 shadow-sm hover:bg-gray-50"
+              aria-label={`Next ${scheduleView === "weekly" ? "week" : "month"}`}
+              onClick={() => moveSchedule(1)}
+            >
+              &gt;
+            </button>
+          </div>
         </section>
 
         <section

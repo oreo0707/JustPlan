@@ -40,38 +40,52 @@ export default function NoteEditorPage() {
   const [objects, setObjects] = useState<NoteObject[]>([]);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [shapeColor, setShapeColor] = useState("#111827");
+  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(4);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showPagePanel, setShowPagePanel] = useState(false);
+  const [showNoteMenu, setShowNoteMenu] = useState(false);
+  const [textContentHeight, setTextContentHeight] = useState(0);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
+  const pageHeight = 960;
 
   const [cursorStyle, setCursorStyle] = useState<
     "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star"
   >("default");
 
   useEffect(() => {
-    const loadedData = loadData();
-    setData(loadedData);
+    const frameId = requestAnimationFrame(() => {
+      const loadedData = loadData();
+      setData(loadedData);
 
-    const foundSubject = loadedData.subjects.find(
-      (item) => item.id === subjectId
-    );
+      const foundSubject = loadedData.subjects.find(
+        (item) => item.id === subjectId
+      );
 
-    const foundNote = foundSubject?.notes.find(
-      (item) => item.id === noteId
-    );
+      const foundNote = foundSubject?.notes.find(
+        (item) => item.id === noteId
+      );
 
-    setSubject(foundSubject ?? null);
-    setNote(foundNote ?? null);
-    setContent(foundNote?.content ?? "");
-    setTemplate(foundNote?.template ?? "plain");
-    setObjects(foundNote?.objects ?? []);
-    setCursorStyle(loadedData.settings.cursor_style);
-    setHasLoaded(true);
+      setSubject(foundSubject ?? null);
+      setNote(foundNote ?? null);
+      setContent(foundNote?.content ?? "");
+      setTemplate(foundNote?.template ?? "plain");
+      setObjects(foundNote?.objects ?? []);
+      setCursorStyle(loadedData.settings.cursor_style);
+      setHasLoaded(true);
+    });
+
+    return () => cancelAnimationFrame(frameId);
   }, [subjectId, noteId]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (!showStickerPicker) return;
+      if (showAddMenu) return;
 
       const target = event.target as Node;
 
@@ -88,25 +102,29 @@ export default function NoteEditorPage() {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [showStickerPicker]);
+  }, [showAddMenu, showStickerPicker]);
 
   useEffect(() => {
     if (!hasLoaded) {
       return;
     }
 
-    saveData(data);
+    const frameId = requestAnimationFrame(() => {
+      saveData(data);
 
-    const updatedSubject = data.subjects.find(
-      (item) => item.id === subjectId
-    );
+      const updatedSubject = data.subjects.find(
+        (item) => item.id === subjectId
+      );
 
-    const updatedNote = updatedSubject?.notes.find(
-      (item) => item.id === noteId
-    );
+      const updatedNote = updatedSubject?.notes.find(
+        (item) => item.id === noteId
+      );
 
-    setSubject(updatedSubject ?? null);
-    setNote(updatedNote ?? null);
+      setSubject(updatedSubject ?? null);
+      setNote(updatedNote ?? null);
+    });
+
+    return () => cancelAnimationFrame(frameId);
   }, [data, hasLoaded, subjectId, noteId]);
 
   function handleSaveNote() {
@@ -148,13 +166,36 @@ export default function NoteEditorPage() {
     setData(updatedData);
   }
 
+  function getCurrentPageIndex() {
+    const scrollTop = scrollContainerRef.current?.scrollTop ?? 0;
+    return Math.max(0, Math.floor(scrollTop / pageHeight));
+  }
+
+  function getCenteredObjectPosition(width: number, height: number) {
+    const availableWidth = canvasRef.current?.clientWidth ?? 900;
+    const pageTop = getCurrentPageIndex() * pageHeight;
+
+    return {
+      x: Math.max(40, (availableWidth - width) / 2),
+      y: pageTop + Math.max(40, (pageHeight - height) / 2),
+    };
+  }
+
+  function scrollToPage(pageIndex: number) {
+    scrollContainerRef.current?.scrollTo({
+      top: pageIndex * pageHeight,
+      behavior: "smooth",
+    });
+  }
+
   function addSticker(src: string) {
+    const position = getCenteredObjectPosition(120, 120);
     const newSticker: NoteObject = {
       id: crypto.randomUUID(),
       type: "sticker",
       src,
-      x: 80,
-      y: 120,
+      x: position.x,
+      y: position.y,
       width: 120,
       height: 120,
       originalWidth: 120,
@@ -176,12 +217,13 @@ export default function NoteEditorPage() {
       return;
     }
 
+    const position = getCenteredObjectPosition(width, height);
     const newImage: NoteObject = {
       id: crypto.randomUUID(),
       type: "image",
       src: storedSrc,
-      x: 100,
-      y: 140,
+      x: position.x,
+      y: position.y,
       width,
       height,
       originalWidth: width,
@@ -197,15 +239,18 @@ export default function NoteEditorPage() {
   function addShape(
     type: "rectangle" | "circle" | "triangle" | "line"
   ) {
+    const width = type === "line" ? 180 : type === "triangle" ? 120 : 140;
+    const height = type === "line" ? 0 : type === "triangle" ? 100 : 90;
+    const position = getCenteredObjectPosition(width, Math.max(height, 80));
     const newShape: NoteObject = {
       id: crypto.randomUUID(),
       type,
-      x: 100,
-      y: 140,
-      width: type === "line" ? 180 : type === "triangle" ? 120 : 140,
-      height: type === "line" ? 0 : type === "triangle" ? 100 : 90,
-      endX: type === "line" ? 280 : undefined,
-      endY: type === "line" ? 140 : undefined,
+      x: position.x,
+      y: position.y,
+      width,
+      height,
+      endX: type === "line" ? position.x + width : undefined,
+      endY: type === "line" ? position.y : undefined,
       color: shapeColor,
       filled: false,
       flipX: false,
@@ -216,15 +261,16 @@ export default function NoteEditorPage() {
   }
 
   function snapToLineGrid(value: number) {
-  return Math.round(value / 32) * 32;
+  return Math.round((value - 16) / 32) * 32 + 16;
 }
 
 function addTextBox() {
+  const position = getCenteredObjectPosition(260, 128);
   const newTextBox: NoteObject = {
     id: crypto.randomUUID(),
     type: "textbox",
-    x: 100,
-    y: snapToLineGrid(128),
+    x: position.x,
+    y: snapToLineGrid(position.y),
     width: 260,
     height: 128,
     text: "",
@@ -280,9 +326,17 @@ function addTextBox() {
     },
     { right: 0, bottom: 0 }
   );
-  const canvasMinimumHeight = `max(calc(100vh - 260px), ${Math.ceil(
-    objectExtents.bottom + 120
-  )}px)`;
+  const contentTextOnly = content
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, "")
+    .trim();
+  const hasTypedContent = contentTextOnly.length > 0;
+  const typedContentBottom = hasTypedContent ? textContentHeight + 32 : 0;
+  const usedBottom = Math.max(objectExtents.bottom, typedContentBottom);
+  const pageCount =
+    usedBottom > 0 ? Math.max(2, Math.ceil(usedBottom / pageHeight) + 1) : 1;
+  const canvasPixelHeight = pageCount * pageHeight;
+  const canvasMinimumHeight = `${canvasPixelHeight}px`;
   const canvasWidth = `max(100%, ${Math.ceil(objectExtents.right + 120)}px)`;
 
   const stickerOptions = [
@@ -710,42 +764,383 @@ function addTextBox() {
     );
   }
 
-  return (
-    <main className="h-screen overflow-auto bg-gray-50">
-      <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-white px-6 py-4">
-        <div>
-          <Link
-            href={`/subjects/${subjectId}`}
-            className="text-sm font-medium text-blue-600"
-          >
-            ← Back to {subject.name}
-          </Link>
-
-          <h1 className="mt-1 text-2xl font-bold text-gray-950">
-            {note.title}
-          </h1>
-
-          <p className="text-sm text-gray-500">
-            {subject.name}
-          </p>
-        </div>
-
+  const noteObjectToolbarControls = (
+    <>
+      <div className="relative">
         <button
-          className="rounded-lg bg-black px-4 py-2 text-white"
-          onClick={handleSaveNote}
+          type="button"
+          className={
+            showAddMenu
+              ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+              : "rounded-lg border px-3 py-1 text-sm"
+          }
+          onClick={() => setShowAddMenu((current) => !current)}
         >
-          Save Note
+          Add
         </button>
+
+        {showAddMenu && (
+          <div className="absolute left-0 top-9 z-[100] w-52 rounded-xl border bg-white p-2 shadow-lg">
+            <button
+              type="button"
+              className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+              onClick={() => {
+                addTextBox();
+                setShowAddMenu(false);
+              }}
+            >
+              Textbox
+            </button>
+
+            <label className="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50">
+              Image
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const src = reader.result;
+                    if (typeof src !== "string") return;
+
+                    const imageElement = new window.Image();
+                    imageElement.onload = () => {
+                      const scale = Math.min(
+                        320 / imageElement.naturalWidth,
+                        240 / imageElement.naturalHeight,
+                        1
+                      );
+                      void addImageObject(
+                        src,
+                        imageElement.naturalWidth * scale,
+                        imageElement.naturalHeight * scale
+                      );
+                    };
+                    imageElement.onerror = () => void addImageObject(src, 320, 200);
+                    imageElement.src = src;
+                  };
+                  reader.readAsDataURL(file);
+                  event.target.value = "";
+                  setShowAddMenu(false);
+                }}
+              />
+            </label>
+
+            <button
+              type="button"
+              className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+              onClick={() => setShowStickerPicker((current) => !current)}
+            >
+              Stickers
+            </button>
+
+            <select
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+              defaultValue=""
+              onChange={(event) => {
+                const value = event.target.value as
+                  | "rectangle"
+                  | "circle"
+                  | "triangle"
+                  | "line";
+
+                if (!value) return;
+
+                addShape(value);
+                event.target.value = "";
+                setShowAddMenu(false);
+              }}
+            >
+              <option value="" disabled>
+                Shape
+              </option>
+              <option value="rectangle">Rectangle</option>
+              <option value="circle">Circle</option>
+              <option value="triangle">Triangle</option>
+              <option value="line">Line</option>
+            </select>
+
+            {showStickerPicker && (
+              <div className="mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2">
+                {stickerOptions.map((sticker) => (
+                  <button
+                    key={sticker.src}
+                    type="button"
+                    className="rounded-lg border bg-white p-1 text-left hover:bg-gray-100"
+                    onClick={() => {
+                      addSticker(sticker.src);
+                      setShowStickerPicker(false);
+                      setShowAddMenu(false);
+                    }}
+                  >
+                    <img
+                      src={sticker.src}
+                      alt={sticker.label}
+                      className="mx-auto h-12 w-12 object-contain"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        className={
+          isDrawingMode
+            ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+            : "rounded-lg border px-3 py-1 text-sm"
+        }
+        onClick={() => {
+          setIsDrawingMode((current) => !current);
+          setIsObjectSelectionMode(false);
+          setSelectedObjectIds([]);
+        }}
+      >
+        Draw
+      </button>
+
+      <button
+        type="button"
+        className={
+          isObjectSelectionMode
+            ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+            : "rounded-lg border px-3 py-1 text-sm"
+        }
+        onClick={() => {
+          setIsObjectSelectionMode((current) => !current);
+          setIsDrawingMode(false);
+          setSelectedObjectIds([]);
+        }}
+      >
+        Select Box
+      </button>
+    </>
+  );
+
+  const thumbnailScale = 0.14;
+  const thumbnailWidth = 900 * thumbnailScale;
+  const thumbnailHeight = pageHeight * thumbnailScale;
+  const thumbnailBackgroundClass = {
+    plain: "bg-white",
+    lined:
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:100%_32px]",
+    grid:
+      "bg-white [background-image:linear-gradient(#e5e7eb_1px,transparent_1px),linear-gradient(90deg,#e5e7eb_1px,transparent_1px)] [background-position:0_48px] [background-size:32px_32px]",
+    dots:
+      "bg-white [background-image:radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:20px_20px]",
+  }[template];
+
+  function renderPagePreview(pageIndex: number) {
+    const pageTop = pageIndex * pageHeight;
+    const pageBottom = pageTop + pageHeight;
+    const pageObjects = objects.filter((object) => {
+      const objectBottom =
+        object.type === "line"
+          ? Math.max(object.y, object.endY ?? object.y + object.height)
+          : object.y + object.height;
+
+      return object.y < pageBottom && objectBottom >= pageTop;
+    });
+
+    return (
+      <div
+        className={`relative overflow-hidden rounded-lg border shadow-sm ${thumbnailBackgroundClass}`}
+        style={{
+          width: thumbnailWidth,
+          height: thumbnailHeight,
+        }}
+      >
+        {pageIndex === 0 && hasTypedContent && (
+          <div
+            className="absolute left-0 top-0 origin-top-left p-4 text-[16px] leading-8 text-gray-500"
+            style={{
+              width: 900,
+              height: pageHeight,
+              transform: `scale(${thumbnailScale})`,
+            }}
+            dangerouslySetInnerHTML={{ __html: content }}
+          />
+        )}
+
+        {pageObjects.map((object) => (
+          <div
+            key={object.id}
+            className="absolute overflow-hidden rounded-sm border border-gray-300/60 bg-white/70"
+            style={{
+              left: object.x * thumbnailScale,
+              top: (object.y - pageTop) * thumbnailScale,
+              width: Math.max(3, object.width * thumbnailScale),
+              height: Math.max(3, object.height * thumbnailScale),
+              backgroundColor:
+                object.type === "rectangle" && object.filled
+                  ? object.color
+                  : undefined,
+              borderColor: object.color,
+            }}
+          >
+            {object.type === "textbox" && (
+              <div
+                className="origin-top-left whitespace-pre-wrap text-gray-700"
+                style={{
+                  width: object.width,
+                  transform: `scale(${thumbnailScale})`,
+                  color: object.color,
+                  fontSize: object.fontSize,
+                  fontFamily: object.fontFamily,
+                }}
+              >
+                {object.text}
+              </div>
+            )}
+
+            {object.type === "sticker" && object.src && (
+              <img
+                src={object.src}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <main ref={scrollContainerRef} className="h-screen overflow-auto bg-gray-50">
+      <Link
+        href={`/subjects/${subjectId}`}
+        className="fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm"
+        aria-label="Back"
+      >
+        ←
+      </Link>
+
+      <header className="flex items-center justify-between border-b bg-white px-16 py-3">
+        <h1 className="text-xl font-bold text-gray-950">
+          {note.title}
+        </h1>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-lg border px-3 py-2 text-sm"
+            onClick={() => setShowPagePanel((current) => !current)}
+            title="Pages"
+          >
+            <span
+              aria-hidden="true"
+              className="block h-5 w-5 bg-contain bg-center bg-no-repeat"
+              style={{ backgroundImage: "url('/app-icons/setting.png')" }}
+            />
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              className="rounded-lg border px-3 py-2 text-sm"
+              onClick={() => setShowNoteMenu((current) => !current)}
+              title="More"
+            >
+              ...
+            </button>
+
+            {showNoteMenu && (
+              <div className="absolute right-0 top-11 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg">
+                <p className="mb-2 text-xs font-semibold text-gray-500">
+                  Note Template
+                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {(["plain", "lined", "grid", "dots"] as NoteTemplate[]).map(
+                    (item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={
+                          template === item
+                            ? "rounded-lg bg-black px-2 py-1 text-xs capitalize text-white"
+                            : "rounded-lg border px-2 py-1 text-xs capitalize"
+                        }
+                        onClick={() => handleChangeTemplate(item)}
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-3 w-full rounded-lg border px-3 py-2 text-left text-sm"
+                  onClick={async () => {
+                    if (navigator.share) {
+                      await navigator.share({ title: note.title, text: content });
+                    } else {
+                      await navigator.clipboard.writeText(content);
+                      window.alert("Note content copied.");
+                    }
+                  }}
+                >
+                  Share note
+                </button>
+
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm"
+                  onClick={() => window.print()}
+                >
+                  Print note
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            className="rounded-lg bg-black px-4 py-2 text-white"
+            onClick={handleSaveNote}
+          >
+            Save Note
+          </button>
+        </div>
       </header>
+
+      {showPagePanel && (
+        <aside className="fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg">
+          <p className="mb-2 text-xs font-semibold text-gray-500">Pages</p>
+          <div className="space-y-2">
+            {Array.from({ length: pageCount }, (_, index) => (
+              <button
+                key={index}
+                type="button"
+                className="w-full rounded-lg border bg-gray-50 p-2 text-left text-sm hover:bg-gray-100"
+                onClick={() => scrollToPage(index)}
+              >
+                <span className="mb-1 block text-xs font-semibold text-gray-600">
+                  Page {index + 1}
+                </span>
+                {renderPagePreview(index)}
+              </button>
+            ))}
+          </div>
+        </aside>
+      )}
 
       <section className="flex min-h-[calc(100vh-89px)] flex-col p-6">
         <div className="mb-4 flex shrink-0 items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-gray-700">
+            <p className="hidden text-sm font-medium text-gray-700">
               Template
             </p>
 
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="hidden mt-2 flex-wrap gap-2">
               {(["plain", "lined", "grid", "dots"] as NoteTemplate[]).map(
                 (item) => (
                   <button
@@ -763,7 +1158,132 @@ function addTextBox() {
               )}
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border bg-white p-3 shadow-sm">
+            <div className="hidden">
+              <div className="relative">
+                <button
+                  type="button"
+                  className={
+                    showAddMenu
+                      ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+                      : "rounded-lg border px-3 py-1 text-sm"
+                  }
+                  onClick={() => setShowAddMenu((current) => !current)}
+                >
+                  Add
+                </button>
+
+                {showAddMenu && (
+                  <div className="absolute left-0 top-9 z-50 w-52 rounded-xl border bg-white p-2 shadow-lg">
+                    <button
+                      type="button"
+                      className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      onClick={() => {
+                        addTextBox();
+                        setShowAddMenu(false);
+                      }}
+                    >
+                      Textbox
+                    </button>
+
+                    <label className="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50">
+                      Image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const src = reader.result;
+                            if (typeof src !== "string") return;
+
+                            const imageElement = new window.Image();
+                            imageElement.onload = () => {
+                              const scale = Math.min(
+                                320 / imageElement.naturalWidth,
+                                240 / imageElement.naturalHeight,
+                                1
+                              );
+                              void addImageObject(
+                                src,
+                                imageElement.naturalWidth * scale,
+                                imageElement.naturalHeight * scale
+                              );
+                            };
+                            imageElement.onerror = () =>
+                              void addImageObject(src, 320, 200);
+                            imageElement.src = src;
+                          };
+                          reader.readAsDataURL(file);
+                          event.target.value = "";
+                          setShowAddMenu(false);
+                        }}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      onClick={() => setShowStickerPicker((current) => !current)}
+                    >
+                      Stickers
+                    </button>
+
+                    <select
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const value = event.target.value as
+                          | "rectangle"
+                          | "circle"
+                          | "triangle"
+                          | "line";
+
+                        if (!value) return;
+
+                        addShape(value);
+                        event.target.value = "";
+                        setShowAddMenu(false);
+                      }}
+                    >
+                      <option value="" disabled>
+                        Shape
+                      </option>
+                      <option value="rectangle">Rectangle</option>
+                      <option value="circle">Circle</option>
+                      <option value="triangle">Triangle</option>
+                      <option value="line">Line</option>
+                    </select>
+
+                    {showStickerPicker && (
+                      <div className="mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2">
+                        {stickerOptions.map((sticker) => (
+                          <button
+                            key={sticker.src}
+                            type="button"
+                            className="rounded-lg border bg-white p-1 text-left hover:bg-gray-100"
+                            onClick={() => {
+                              addSticker(sticker.src);
+                              setShowStickerPicker(false);
+                              setShowAddMenu(false);
+                            }}
+                          >
+                            <img
+                              src={sticker.src}
+                              alt={sticker.label}
+                              className="mx-auto h-12 w-12 object-contain"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
                 className={
@@ -773,6 +1293,7 @@ function addTextBox() {
                 }
                 onClick={() => {
                   setIsObjectSelectionMode((current) => !current);
+                  setIsDrawingMode(false);
                   setSelectedObjectIds([]);
                 }}
               >
@@ -781,12 +1302,37 @@ function addTextBox() {
 
               <button
                 type="button"
-                className="rounded-lg border px-3 py-1 text-sm"
-                onClick={addTextBox}
+                className={
+                  isDrawingMode
+                    ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+                    : "rounded-lg border px-3 py-1 text-sm"
+                }
+                onClick={() => {
+                  setIsDrawingMode((current) => !current);
+                  setIsObjectSelectionMode(false);
+                  setSelectedObjectIds([]);
+                }}
               >
-                Text Box
+                {isDrawingMode ? "Done Drawing" : "Draw"}
               </button>
-              <div className="relative" ref={stickerPickerRef}>
+
+              {isDrawingMode && (
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  Pen Size
+                  <input
+                    type="range"
+                    min="2"
+                    max="16"
+                    value={drawingStrokeWidth}
+                    onChange={(event) =>
+                      setDrawingStrokeWidth(Number(event.target.value))
+                    }
+                  />
+                  <span className="w-6 text-right">{drawingStrokeWidth}</span>
+                </label>
+              )}
+
+              <div className="hidden" ref={stickerPickerRef}>
                 <button
                   type="button"
                   className="rounded-lg border px-3 py-1 text-sm"
@@ -833,6 +1379,7 @@ function addTextBox() {
               </div>
 
               <select
+                hidden
                 className="rounded-lg border px-3 py-1 text-sm"
                 defaultValue=""
                 onChange={(event) => {
@@ -868,7 +1415,8 @@ function addTextBox() {
               {selectedObject && (
                 <>
                   {selectedObject.type !== "textbox" &&
-                    selectedObject.type !== "line" && (
+                    selectedObject.type !== "line" &&
+                    selectedObject.type !== "drawing" && (
                     <>
                       <button
                         className="rounded-lg border px-3 py-1 text-sm"
@@ -894,7 +1442,8 @@ function addTextBox() {
                     </>
                   )}
 
-                  {selectedObject.type !== "sticker" &&
+                  {selectedObject.type !== "textbox" &&
+                    selectedObject.type !== "sticker" &&
                     selectedObject.type !== "image" && (
                     <button
                       className="rounded-lg border px-3 py-1 text-sm"
@@ -911,6 +1460,7 @@ function addTextBox() {
                   {selectedObject.type !== "sticker" &&
                     selectedObject.type !== "image" &&
                     selectedObject.type !== "line" &&
+                    selectedObject.type !== "drawing" &&
                     selectedObject.type !== "textbox" && (
                     <button
                       type="button"
@@ -931,10 +1481,11 @@ function addTextBox() {
         </div>
 
         <div
+          ref={canvasRef}
           className="relative"
           style={{ minHeight: canvasMinimumHeight, width: canvasWidth }}
           onPointerDown={() => {
-            if (!isObjectSelectionMode) {
+            if (!isObjectSelectionMode && !isDrawingMode) {
               setSelectedObjectIds([]);
             }
           }}
@@ -942,14 +1493,19 @@ function addTextBox() {
           <PaperBackground
             template={template}
             minimumHeight={canvasMinimumHeight}
+            pageCount={pageCount}
+            pageHeight={pageHeight}
           >
             <RichNoteEditor
               content={content}
               onChange={setContent}
-              onAddImage={addImageObject}
               minimumHeight={canvasMinimumHeight}
               defaultFontFamily={data.settings.default_font_family}
               defaultFontSize={data.settings.default_font_size}
+              sharedColor={shapeColor}
+              onSharedColorChange={setShapeColor}
+              toolbarControls={noteObjectToolbarControls}
+              onContentHeightChange={setTextContentHeight}
             />
           </PaperBackground>
 
@@ -959,9 +1515,13 @@ function addTextBox() {
             onSelectionChange={setSelectedObjectIds}
             onChangeObjects={handleChangeObjects}
             selectionMode={isObjectSelectionMode}
+            drawingMode={isDrawingMode}
+            drawingColor={shapeColor}
+            drawingStrokeWidth={drawingStrokeWidth}
           />
         </div>
       </section>
     </main>
   );
 }
+

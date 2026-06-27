@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { NoteObject, ShapeVertex } from "@/lib/types";
+import type { DrawingPoint, NoteObject, ShapeVertex } from "@/lib/types";
 import { StoredImage } from "@/components/StoredImage";
 import { deleteStoredImage } from "@/lib/image-storage";
 
@@ -11,6 +11,9 @@ type NoteObjectLayerProps = {
   onSelectionChange: (ids: string[]) => void;
   onChangeObjects: (objects: NoteObject[]) => void;
   selectionMode: boolean;
+  drawingMode: boolean;
+  drawingColor: string;
+  drawingStrokeWidth: number;
 };
 
 type SelectionBox = {
@@ -19,6 +22,19 @@ type SelectionBox = {
   width: number;
   height: number;
 };
+
+type LayerDirection = "back" | "front";
+
+const NOTE_FONT_FAMILIES = [
+  "Arial",
+  "Georgia",
+  "Times New Roman",
+  "Courier New",
+  "Verdana",
+  "Comic Sans MS",
+];
+
+const NOTE_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36];
 
 function getLinePoints(object: NoteObject) {
   if (object.endX !== undefined && object.endY !== undefined) {
@@ -58,6 +74,16 @@ function getObjectBounds(object: NoteObject): SelectionBox {
     width: object.width,
     height: object.height,
   };
+}
+
+function getDrawingPath(points: DrawingPoint[]) {
+  if (!points.length) return "";
+
+  return points
+    .map((point, index) =>
+      index === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+    )
+    .join(" ");
 }
 
 function boxesIntersect(a: SelectionBox, b: SelectionBox) {
@@ -136,9 +162,15 @@ export function NoteObjectLayer({
   onSelectionChange,
   onChangeObjects,
   selectionMode,
+  drawingMode,
+  drawingColor,
+  drawingStrokeWidth,
 }: NoteObjectLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
+  const savedTextSelectionRef = useRef<Range | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
+  const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
 
   function updateObject(id: string, updates: Partial<NoteObject>) {
     onChangeObjects(
@@ -146,6 +178,120 @@ export function NoteObjectLayer({
         object.id === id ? { ...object, ...updates } : object
       )
     );
+  }
+
+  function escapeHtml(value: string) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;")
+      .replaceAll("\n", "<br>");
+  }
+
+  function getTextBoxEditor(id: string) {
+    return document.querySelector<HTMLElement>(
+      `[data-textbox-editor="${id}"]`
+    );
+  }
+
+  function saveTextSelection(editor: HTMLElement) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (
+      editor.contains(range.commonAncestorContainer) ||
+      editor === range.commonAncestorContainer
+    ) {
+      savedTextSelectionRef.current = range.cloneRange();
+    }
+  }
+
+  function getUsableTextSelection(editor: HTMLElement) {
+    const range = savedTextSelectionRef.current;
+    if (!range || range.collapsed) return null;
+
+    if (
+      !editor.contains(range.commonAncestorContainer) &&
+      editor !== range.commonAncestorContainer
+    ) {
+      return null;
+    }
+
+    return range;
+  }
+
+  function updateTextBoxContent(id: string, editor: HTMLElement) {
+    updateObject(id, {
+      html: editor.innerHTML,
+      text: editor.innerText,
+    });
+  }
+
+  function applyTextBoxStyle(
+    object: NoteObject,
+    updates: Pick<NoteObject, "color" | "fontSize" | "fontFamily"> & {
+      bold?: boolean;
+      underline?: boolean;
+    }
+  ) {
+    const editor = getTextBoxEditor(object.id);
+    const range = editor ? getUsableTextSelection(editor) : null;
+    const anchorTextToLine = (element: HTMLElement) => {
+      element.style.display = "inline-block";
+      element.style.lineHeight = "1";
+      element.style.verticalAlign = "bottom";
+    };
+
+    if (!editor || !range) {
+      if (editor) {
+        editor.querySelectorAll<HTMLElement>("*").forEach((element) => {
+          anchorTextToLine(element);
+          if (updates.color) element.style.color = updates.color;
+          if (updates.fontSize) element.style.fontSize = `${updates.fontSize}px`;
+          if (updates.fontFamily) element.style.fontFamily = updates.fontFamily;
+          if (updates.bold) element.style.fontWeight = "700";
+          if (updates.underline) element.style.textDecoration = "underline";
+        });
+
+        if (updates.bold) editor.style.fontWeight = "700";
+        if (updates.underline) editor.style.textDecoration = "underline";
+
+        updateObject(object.id, {
+          ...updates,
+          html: editor.innerHTML,
+          text: editor.innerText,
+        });
+        return;
+      }
+
+      updateObject(object.id, updates);
+      return;
+    }
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const span = document.createElement("span");
+    anchorTextToLine(span);
+    if (updates.color) span.style.color = updates.color;
+    if (updates.fontSize) span.style.fontSize = `${updates.fontSize}px`;
+    if (updates.fontFamily) span.style.fontFamily = updates.fontFamily;
+    if (updates.bold) span.style.fontWeight = "700";
+    if (updates.underline) span.style.textDecoration = "underline";
+
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(span);
+    selection?.removeAllRanges();
+    selection?.addRange(nextRange);
+    savedTextSelectionRef.current = nextRange.cloneRange();
+    updateTextBoxContent(object.id, editor);
   }
 
   function deleteObject(id: string) {
@@ -156,6 +302,61 @@ export function NoteObjectLayer({
 
     onChangeObjects(objects.filter((object) => object.id !== id));
     onSelectionChange(selectedObjectIds.filter((selectedId) => selectedId !== id));
+  }
+
+  function reorderSelectedObjects(direction: LayerDirection) {
+    if (selectedObjectIds.length === 0) return;
+
+    const selectedIds = new Set(selectedObjectIds);
+
+    if (direction === "back") {
+      onChangeObjects([
+        ...objects.filter((object) => selectedIds.has(object.id)),
+        ...objects.filter((object) => !selectedIds.has(object.id)),
+      ]);
+      return;
+    }
+
+    if (direction === "front") {
+      onChangeObjects([
+        ...objects.filter((object) => !selectedIds.has(object.id)),
+        ...objects.filter((object) => selectedIds.has(object.id)),
+      ]);
+      return;
+    }
+
+  }
+
+  function renderLayerControls() {
+    return (
+      <div className="pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm">
+        {(["back", "front"] as LayerDirection[]).map(
+          (direction) => (
+            <button
+              key={direction}
+              type="button"
+              className="rounded-md px-2 py-1 text-gray-700 hover:bg-gray-100"
+              title={
+                direction === "back"
+                  ? "Send to back"
+                  : "Bring to front"
+              }
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                reorderSelectedObjects(direction);
+              }}
+            >
+              {direction === "back" ? "Back" : "Front"}
+            </button>
+          )
+        )}
+      </div>
+    );
   }
 
   function startDrag(
@@ -210,7 +411,7 @@ export function NoteObjectLayer({
             x: original.x + dx,
             y:
               original.type === "textbox"
-                ? Math.round(nextY / 32) * 32
+                ? Math.round((nextY - 16) / 32) * 32 + 16
                 : nextY,
           };
         })
@@ -287,6 +488,76 @@ export function NoteObjectLayer({
     function handleUp() {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function startDrawing(event: React.PointerEvent<HTMLDivElement>) {
+    if (!drawingMode || event.target !== event.currentTarget) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const layerBounds = layerRef.current?.getBoundingClientRect();
+    if (!layerBounds) return;
+
+    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
+      x: pointerEvent.clientX - layerBounds.left,
+      y: pointerEvent.clientY - layerBounds.top,
+    });
+
+    const firstPoint = getPoint(event);
+    let points = [firstPoint];
+    setActiveDrawingPoints(points);
+    onSelectionChange([]);
+
+    function handleMove(moveEvent: PointerEvent) {
+      const nextPoint = getPoint(moveEvent);
+      const lastPoint = points[points.length - 1];
+      const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
+
+      if (distance < 2) return;
+
+      points = [...points, nextPoint];
+      setActiveDrawingPoints(points);
+    }
+
+    function handleUp() {
+      setActiveDrawingPoints([]);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+
+      if (points.length < 2) return;
+
+      const padding = Math.max(6, drawingStrokeWidth);
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+      const left = Math.max(0, Math.min(...xs) - padding);
+      const top = Math.max(0, Math.min(...ys) - padding);
+      const right = Math.max(...xs) + padding;
+      const bottom = Math.max(...ys) + padding;
+
+      const newDrawing: NoteObject = {
+        id: crypto.randomUUID(),
+        type: "drawing",
+        x: left,
+        y: top,
+        width: Math.max(1, right - left),
+        height: Math.max(1, bottom - top),
+        points: points.map((point) => ({
+          x: point.x - left,
+          y: point.y - top,
+        })),
+        color: drawingColor,
+        strokeWidth: drawingStrokeWidth,
+        flipX: false,
+        flipY: false,
+      };
+
+      onChangeObjects([...objects, newDrawing]);
+      onSelectionChange([newDrawing.id]);
     }
 
     window.addEventListener("pointermove", handleMove);
@@ -393,7 +664,7 @@ export function NoteObjectLayer({
   }
 
   function startSelectionBox(event: React.PointerEvent<HTMLDivElement>) {
-    if (!selectionMode || event.target !== event.currentTarget) return;
+    if (!selectionMode || drawingMode || event.target !== event.currentTarget) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -420,11 +691,7 @@ export function NoteObjectLayer({
       setSelectionBox(box);
       onSelectionChange(
         objects
-          .filter(
-            (object) =>
-              object.type !== "textbox" &&
-              boxesIntersect(box, getObjectBounds(object))
-          )
+          .filter((object) => boxesIntersect(box, getObjectBounds(object)))
           .map((object) => object.id)
       );
     }
@@ -445,12 +712,32 @@ export function NoteObjectLayer({
     <div
       ref={layerRef}
       className={
-        selectionMode
+        selectionMode || drawingMode
           ? "pointer-events-auto absolute inset-0 z-20 cursor-crosshair"
           : "pointer-events-none absolute inset-0 z-20"
       }
-      onPointerDown={startSelectionBox}
+      onPointerDown={(event) => {
+        if (drawingMode) {
+          startDrawing(event);
+          return;
+        }
+
+        startSelectionBox(event);
+      }}
     >
+      {activeDrawingPoints.length > 0 && (
+        <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+          <path
+            d={getDrawingPath(activeDrawingPoints)}
+            fill="none"
+            stroke={drawingColor}
+            strokeWidth={drawingStrokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+
       {objects.map((object) => {
         const selected = selectedObjectIds.includes(object.id);
 
@@ -496,6 +783,12 @@ export function NoteObjectLayer({
               {selected && hasSingleSelection && (
                 <>
                   <div
+                    className="absolute"
+                    style={{ left: points.startX, top: points.startY }}
+                  >
+                    {renderLayerControls()}
+                  </div>
+                  <div
                     className="pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
                     style={{ left: points.startX, top: points.startY }}
                     onPointerDown={(event) =>
@@ -527,8 +820,7 @@ export function NoteObjectLayer({
           );
         }
 
-        const ignoreDuringBoxSelection =
-          selectionMode && object.type === "textbox";
+        const ignoreDuringDrawing = drawingMode;
         const shapeVertices = isVertexShape(object)
           ? getShapeVertices(object)
           : [];
@@ -537,7 +829,9 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              ignoreDuringBoxSelection ? "pointer-events-none" : "pointer-events-auto"
+              ignoreDuringDrawing
+                ? "pointer-events-none"
+                : "pointer-events-auto"
             } absolute cursor-move ${
               selected
                 ? "ring-2 ring-blue-600 ring-offset-2 ring-offset-transparent"
@@ -565,30 +859,148 @@ export function NoteObjectLayer({
             {object.type === "textbox" && (
               <div className="relative h-full w-full">
                 {selected && hasSingleSelection && (
-                  <div
-                    className="absolute -top-7 left-0 rounded-md bg-black px-2 py-1 text-xs text-white"
-                    onPointerDown={(event) => startDrag(event, object)}
-                  >
-                    Move
-                  </div>
+                  <>
+                    <div
+                      className="absolute -top-7 left-0 rounded-md bg-black px-2 py-1 text-xs text-white"
+                      onPointerDown={(event) => startDrag(event, object)}
+                    >
+                      Move
+                    </div>
+
+                    <button
+                      type="button"
+                      className="absolute -top-7 left-14 rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOpenTextBoxMenuId((current) =>
+                          current === object.id ? null : object.id
+                        );
+                      }}
+                    >
+                      ...
+                    </button>
+
+                    {openTextBoxMenuId === object.id && (
+                      <div
+                        className="pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <label className="flex items-center gap-1 text-gray-700">
+                          Color
+                          <input
+                            type="color"
+                            value={object.color ?? "#111827"}
+                            className="h-7 w-9 rounded border"
+                            onChange={(event) =>
+                              applyTextBoxStyle(object, {
+                                color: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-1 font-bold"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            applyTextBoxStyle(object, { bold: true });
+                          }}
+                        >
+                          B
+                        </button>
+
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-1 underline"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            applyTextBoxStyle(object, { underline: true });
+                          }}
+                        >
+                          U
+                        </button>
+
+                        <label className="flex items-center gap-1 text-gray-700">
+                          Size
+                          <select
+                            value={object.fontSize ?? 16}
+                            className="rounded border px-2 py-1"
+                            onChange={(event) =>
+                              applyTextBoxStyle(object, {
+                                fontSize: Number(event.target.value),
+                              })
+                            }
+                          >
+                            {NOTE_FONT_SIZES.map((fontSize) => (
+                              <option key={fontSize} value={fontSize}>
+                                {fontSize}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="flex items-center gap-1 text-gray-700">
+                          Font
+                          <select
+                            value={object.fontFamily ?? "Arial"}
+                            className="rounded border px-2 py-1"
+                            onChange={(event) =>
+                              applyTextBoxStyle(object, {
+                                fontFamily: event.target.value,
+                              })
+                            }
+                          >
+                            {NOTE_FONT_FAMILIES.map((fontFamily) => (
+                              <option key={fontFamily} value={fontFamily}>
+                                {fontFamily}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                  </>
                 )}
-                <textarea
-                  value={object.text ?? ""}
-                  placeholder="Type here..."
-                  className="h-full w-full resize-none border-none bg-transparent p-0 text-gray-950 outline-none"
+                <div
+                  data-textbox-editor={object.id}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...'] [&_span]:inline-block [&_span]:align-bottom [&_span]:leading-none [&_*]:align-bottom"
                   style={{
                     color: object.color ?? "#111827",
                     fontSize: `${object.fontSize ?? 16}px`,
                     fontFamily: object.fontFamily ?? "Arial",
                     lineHeight: "32px",
                   }}
+                  dangerouslySetInnerHTML={{
+                    __html: object.html ?? escapeHtml(object.text ?? ""),
+                  }}
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     onSelectionChange([object.id]);
                   }}
-                  onChange={(event) =>
-                    updateObject(object.id, { text: event.target.value })
+                  onMouseUp={(event) => saveTextSelection(event.currentTarget)}
+                  onKeyUp={(event) => saveTextSelection(event.currentTarget)}
+                  onInput={(event) =>
+                    updateTextBoxContent(object.id, event.currentTarget)
                   }
+                  onPaste={(event) => {
+                    event.preventDefault();
+                    const text = event.clipboardData.getData("text/plain");
+                    document.execCommand("insertText", false, text);
+                    updateTextBoxContent(object.id, event.currentTarget);
+                  }}
                 />
               </div>
             )}
@@ -668,6 +1080,26 @@ export function NoteObjectLayer({
               </svg>
             )}
 
+            {object.type === "drawing" && (
+              <svg
+                width="100%"
+                height="100%"
+                viewBox={`0 0 ${Math.max(1, object.width)} ${Math.max(1, object.height)}`}
+                preserveAspectRatio="none"
+                className="overflow-visible"
+              >
+                <path
+                  d={getDrawingPath(object.points ?? [])}
+                  fill="none"
+                  stroke={object.color ?? "#111827"}
+                  strokeWidth={object.strokeWidth ?? 4}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+            )}
+
             {selected && hasSingleSelection && isVertexShape(object) &&
               shapeVertices.map((vertex, index) => (
                 <div
@@ -682,6 +1114,8 @@ export function NoteObjectLayer({
 
             {selected && hasSingleSelection && (
               <>
+                {renderLayerControls()}
+
                 {(object.type === "image" || object.type === "sticker") && (
                   <>
                     <div

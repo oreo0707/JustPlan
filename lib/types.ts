@@ -35,9 +35,15 @@ export type NoteObjectType =
   | "circle"
   | "triangle"
   | "line"
+  | "drawing"
   | "textbox";
 
 export type ShapeVertex = {
+  x: number;
+  y: number;
+};
+
+export type DrawingPoint = {
   x: number;
   y: number;
 };
@@ -58,11 +64,14 @@ export type NoteObject = {
   endX?: number;
   endY?: number;
   vertices?: ShapeVertex[];
+  points?: DrawingPoint[];
+  strokeWidth?: number;
 
   color?: string;
   filled?: boolean;
 
   text?: string;
+  html?: string;
   fontSize?: number;
   fontFamily?: string;
 
