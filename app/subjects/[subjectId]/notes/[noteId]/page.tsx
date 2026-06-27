@@ -796,7 +796,7 @@ function addTextBox() {
         </button>
 
         {showAddMenu && (
-          <div className="absolute left-0 top-9 z-[100] w-52 rounded-xl border bg-white p-2 shadow-lg">
+          <div className="absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg">
             <button
               type="button"
               className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
@@ -1196,7 +1196,7 @@ function addTextBox() {
                 </button>
 
                 {showAddMenu && (
-                  <div className="absolute left-0 top-9 z-50 w-52 rounded-xl border bg-white p-2 shadow-lg">
+                  <div className="absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg">
                     <button
                       type="button"
                       className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
@@ -1372,7 +1372,7 @@ function addTextBox() {
                 </button>
 
                 {showStickerPicker && (
-                  <div className="absolute left-0 top-10 z-50 w-80 rounded-xl border bg-white p-3 shadow-lg">
+                  <div className="absolute left-0 top-10 z-[10001] w-80 rounded-xl border bg-white p-3 shadow-lg">
                     <p className="mb-2 text-sm font-semibold text-gray-800">
                       Choose a sticker
                     </p>

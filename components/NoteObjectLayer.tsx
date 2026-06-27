@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DrawingPoint, NoteObject, ShapeVertex } from "@/lib/types";
 import { StoredImage } from "@/components/StoredImage";
 import { deleteStoredImage } from "@/lib/image-storage";
@@ -287,9 +287,28 @@ export function NoteObjectLayer({
 }: NoteObjectLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
+  const isCommittingPendingDrawingsRef = useRef(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
+  const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      drawingMode ||
+      pendingDrawings.length === 0 ||
+      isCommittingPendingDrawingsRef.current
+    ) {
+      return;
+    }
+
+    onChangeObjects([...objects, ...pendingDrawings]);
+    isCommittingPendingDrawingsRef.current = true;
+    window.setTimeout(() => {
+      setPendingDrawings([]);
+      isCommittingPendingDrawingsRef.current = false;
+    }, 0);
+  }, [drawingMode, objects, onChangeObjects, pendingDrawings]);
 
   function updateObject(id: string, updates: Partial<NoteObject>) {
     onChangeObjects(
@@ -623,6 +642,7 @@ export function NoteObjectLayer({
     const erasingElement = event.currentTarget;
     const pointerId = event.pointerId;
     let workingObjects = objects;
+    let workingPendingDrawings = pendingDrawings;
 
     const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
       x: pointerEvent.clientX - layerBounds.left,
@@ -630,19 +650,34 @@ export function NoteObjectLayer({
     });
 
     function eraseAt(point: DrawingPoint) {
-      let changed = false;
+      let savedChanged = false;
+      let pendingChanged = false;
       const nextObjects = workingObjects.flatMap((object) => {
         if (object.type !== "drawing") return [object];
 
         const result = eraseDrawingAtPoint(object, point);
-        if (result.changed) changed = true;
+        if (result.changed) savedChanged = true;
+
+        return result.objects;
+      });
+      const nextPendingDrawings = workingPendingDrawings.flatMap((object) => {
+        const result = eraseDrawingAtPoint(object, point);
+        if (result.changed) pendingChanged = true;
 
         return result.objects;
       });
 
-      if (changed) {
+      if (savedChanged) {
         workingObjects = nextObjects;
         onChangeObjects(nextObjects);
+      }
+
+      if (pendingChanged) {
+        workingPendingDrawings = nextPendingDrawings;
+        setPendingDrawings(nextPendingDrawings);
+      }
+
+      if (savedChanged || pendingChanged) {
         onSelectionChange([]);
       }
     }
@@ -768,7 +803,7 @@ export function NoteObjectLayer({
         flipY: false,
       };
 
-      onChangeObjects([...objects, newDrawing]);
+      setPendingDrawings((current) => [...current, newDrawing]);
       onSelectionChange([]);
     }
 
@@ -964,6 +999,37 @@ export function NoteObjectLayer({
           />
         </svg>
       )}
+
+      {pendingDrawings.map((object) => (
+        <div
+          key={object.id}
+          className="pointer-events-none absolute"
+          style={{
+            left: object.x,
+            top: object.y,
+            width: object.width,
+            height: object.height,
+          }}
+        >
+          <svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${Math.max(1, object.width)} ${Math.max(1, object.height)}`}
+            preserveAspectRatio="none"
+            className="overflow-visible"
+          >
+            <path
+              d={getDrawingPath(object.points ?? [])}
+              fill="none"
+              stroke={object.color ?? "#111827"}
+              strokeWidth={object.strokeWidth ?? 4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        </div>
+      ))}
 
       {objects.map((object) => {
         const selected = !drawingMode && selectedObjectIds.includes(object.id);

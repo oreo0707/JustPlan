@@ -111,7 +111,7 @@ export function RichNoteEditor({
 
   const activeEditor = editor;
   const toolbar = (
-    <div className="no-print fixed left-[47%] top-4 z-[10000] flex w-max max-w-[calc(100vw-3rem)] -translate-x-1/2 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-visible rounded-xl border bg-white/95 px-4 py-3 shadow-lg backdrop-blur [&>*]:shrink-0">
+    <div className="no-print fixed left-[48%] top-4 z-[10000] flex w-max max-w-none -translate-x-1/2 flex-nowrap items-center gap-2 overflow-visible rounded-xl border bg-white/95 px-4 py-3 shadow-lg backdrop-blur [&>*]:shrink-0">
       <button
         type="button"
         className="rounded-lg border px-3 py-1 text-sm font-bold"
