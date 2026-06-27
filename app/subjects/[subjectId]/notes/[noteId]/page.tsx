@@ -1032,7 +1032,7 @@ function addTextBox() {
           <button
             type="button"
             className="rounded-lg border px-3 py-2 text-sm"
-            onClick={() => setShowPagePanel((current) => !current)}
+            onClick={() => setShowNoteMenu((current) => !current)}
             title="Pages"
           >
             <span
@@ -1046,7 +1046,7 @@ function addTextBox() {
             <button
               type="button"
               className="rounded-lg border px-3 py-2 text-sm"
-              onClick={() => setShowNoteMenu((current) => !current)}
+              onClick={() => setShowPagePanel((current) => !current)}
               title="More"
             >
               ...
