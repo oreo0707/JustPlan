@@ -74,12 +74,12 @@ const presets: Array<{ label: string; colors: AppColors }> = [
     },
   },
   {
-    label: "Matcha Breeze",
+    label: "Light Taro",
     colors: {
-      app_background_color: "#d8efe1",
-      app_surface_color: "#dbf4ff",
-      app_accent_color: "#ffffe5",
-      app_text_color: "#98ae98",
+      app_background_color: "#c6c8e6",
+      app_surface_color: "#fef6e1",
+      app_accent_color: "#8c6e63",
+      app_text_color: "#b08e6d",
     },
   },
   {
