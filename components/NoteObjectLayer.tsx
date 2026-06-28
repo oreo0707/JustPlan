@@ -776,7 +776,7 @@ export function NoteObjectLayer({
   }
 
   function startDrawing(event: React.PointerEvent<HTMLDivElement>) {
-    if (!drawingMode || event.target !== event.currentTarget) return;
+    if (!drawingMode) return;
 
     event.preventDefault();
     event.stopPropagation();
