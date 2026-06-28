@@ -17,6 +17,8 @@ type NoteObjectLayerProps = {
   drawingStrokeWidth: number;
   theme?: "light" | "dark";
   saveRequestId?: number;
+  undoRequestId?: number;
+  onPendingDrawingCountChange?: (count: number) => void;
   pageWidth?: number;
   pageHeight?: number;
   pageCount?: number;
@@ -147,12 +149,15 @@ function createDrawingFromAbsolutePoints(
   };
 }
 
-function eraseDrawingAtPoint(object: NoteObject, point: DrawingPoint) {
+function eraseDrawingAtPoint(
+  object: NoteObject,
+  point: DrawingPoint,
+  hitRadius: number
+) {
   if (object.type !== "drawing" || !object.points || object.points.length < 2) {
     return { changed: false, objects: [object] };
   }
 
-  const hitRadius = Math.max(12, (object.strokeWidth ?? 4) + 8);
   const absolutePoints = object.points.map((drawingPoint) => ({
     x: object.x + drawingPoint.x,
     y: object.y + drawingPoint.y,
@@ -291,6 +296,8 @@ export function NoteObjectLayer({
   drawingStrokeWidth,
   theme = "light",
   saveRequestId = 0,
+  undoRequestId = 0,
+  onPendingDrawingCountChange,
   pageWidth = 794,
   pageHeight = 1123,
   pageCount = 1,
@@ -298,10 +305,13 @@ export function NoteObjectLayer({
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
   const lastHandledSaveRequestIdRef = useRef(0);
+  const lastHandledUndoRequestIdRef = useRef(0);
   const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
   const activeDrawingFrameRef = useRef<number | null>(null);
+  const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
+  const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
   const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
@@ -363,8 +373,48 @@ export function NoteObjectLayer({
     onChangeObjects([...objects, ...pendingDrawings]);
     window.setTimeout(() => {
       setPendingDrawings([]);
+      pendingDrawingUndoStackRef.current = [];
     }, 0);
   }, [objects, onChangeObjects, pendingDrawings, saveRequestId]);
+
+  useEffect(() => {
+    onPendingDrawingCountChange?.(pendingDrawings.length);
+  }, [onPendingDrawingCountChange, pendingDrawings.length]);
+
+  useEffect(() => {
+    if (
+      undoRequestId === 0 ||
+      lastHandledUndoRequestIdRef.current === undoRequestId
+    ) {
+      return;
+    }
+
+    lastHandledUndoRequestIdRef.current = undoRequestId;
+
+    window.setTimeout(() => {
+      const previousPendingDrawings = pendingDrawingUndoStackRef.current.pop();
+
+      if (previousPendingDrawings) {
+        setPendingDrawings(previousPendingDrawings);
+        return;
+      }
+
+      setPendingDrawings((current) => current.slice(0, -1));
+    }, 0);
+  }, [undoRequestId]);
+
+  function pushPendingDrawingUndoSnapshot(nextSnapshot = pendingDrawings) {
+    const latestSnapshot = pendingDrawingUndoStackRef.current.at(-1);
+
+    if (JSON.stringify(latestSnapshot) === JSON.stringify(nextSnapshot)) {
+      return;
+    }
+
+    pendingDrawingUndoStackRef.current = [
+      ...pendingDrawingUndoStackRef.current.slice(-49),
+      nextSnapshot,
+    ];
+  }
 
   function updateObject(id: string, updates: Partial<NoteObject>) {
     onChangeObjects(
@@ -699,6 +749,8 @@ export function NoteObjectLayer({
     const pointerId = event.pointerId;
     let workingObjects = objects;
     let workingPendingDrawings = pendingDrawings;
+    const eraserRadius = Math.max(2, drawingStrokeWidth / 2);
+    let pendingUndoSnapshotCaptured = false;
 
     const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
       x: pointerEvent.clientX - layerBounds.left,
@@ -708,18 +760,20 @@ export function NoteObjectLayer({
     function eraseAt(point: DrawingPoint) {
       if (!isPointInsidePaper(point)) return;
 
+      setEraserPoint(point);
+
       let savedChanged = false;
       let pendingChanged = false;
       const nextObjects = workingObjects.flatMap((object) => {
         if (object.type !== "drawing") return [object];
 
-        const result = eraseDrawingAtPoint(object, point);
+        const result = eraseDrawingAtPoint(object, point, eraserRadius);
         if (result.changed) savedChanged = true;
 
         return result.objects;
       });
       const nextPendingDrawings = workingPendingDrawings.flatMap((object) => {
-        const result = eraseDrawingAtPoint(object, point);
+        const result = eraseDrawingAtPoint(object, point, eraserRadius);
         if (result.changed) pendingChanged = true;
 
         return result.objects;
@@ -731,6 +785,11 @@ export function NoteObjectLayer({
       }
 
       if (pendingChanged) {
+        if (!pendingUndoSnapshotCaptured) {
+          pushPendingDrawingUndoSnapshot(workingPendingDrawings);
+          pendingUndoSnapshotCaptured = true;
+        }
+
         workingPendingDrawings = nextPendingDrawings;
         setPendingDrawings(nextPendingDrawings);
       }
@@ -763,6 +822,7 @@ export function NoteObjectLayer({
       erasingElement.removeEventListener("pointerup", finishErasing);
       erasingElement.removeEventListener("pointercancel", finishErasing);
       erasingElement.removeEventListener("lostpointercapture", finishErasing);
+      setEraserPoint(null);
 
       if (erasingElement.hasPointerCapture(pointerId)) {
         erasingElement.releasePointerCapture(pointerId);
@@ -775,7 +835,7 @@ export function NoteObjectLayer({
     erasingElement.addEventListener("lostpointercapture", finishErasing);
   }
 
-  function startDrawing(event: React.PointerEvent<HTMLDivElement>) {
+  function startDrawing(event: PointerEvent | React.PointerEvent<HTMLDivElement>) {
     if (!drawingMode) return;
 
     event.preventDefault();
@@ -874,6 +934,7 @@ export function NoteObjectLayer({
         flipY: false,
       };
 
+      pushPendingDrawingUndoSnapshot();
       setPendingDrawings((current) => [...current, newDrawing]);
       onSelectionChange([]);
     }
@@ -883,6 +944,25 @@ export function NoteObjectLayer({
     window.addEventListener("pointerup", finishDrawing);
     window.addEventListener("pointercancel", finishDrawing);
   }
+
+  useEffect(() => {
+    if (!drawingMode || drawingTool === "erase") return;
+
+    const drawingLayer = layerRef.current;
+    if (!drawingLayer) return;
+
+    function handleNativePointerDown(event: PointerEvent) {
+      startDrawing(event);
+    }
+
+    drawingLayer.addEventListener("pointerdown", handleNativePointerDown, {
+      passive: false,
+    });
+
+    return () => {
+      drawingLayer.removeEventListener("pointerdown", handleNativePointerDown);
+    };
+  });
 
   function startLineEndpointDrag(
     event: React.PointerEvent<HTMLDivElement>,
@@ -1044,13 +1124,13 @@ export function NoteObjectLayer({
         touchAction: drawingMode || selectionMode ? "none" : "auto",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
+        WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
+        overscrollBehavior: drawingMode || selectionMode ? "none" : undefined,
       }}
       onPointerDown={(event) => {
         if (drawingMode) {
           if (drawingTool === "erase") {
             startErasing(event);
-          } else {
-            startDrawing(event);
           }
           return;
         }
@@ -1058,6 +1138,18 @@ export function NoteObjectLayer({
         startSelectionBox(event);
       }}
     >
+      {drawingMode && drawingTool === "erase" && eraserPoint && (
+        <div
+          className="pointer-events-none absolute rounded-full border-2 border-blue-500 bg-blue-400/15"
+          style={{
+            left: eraserPoint.x - drawingStrokeWidth / 2,
+            top: eraserPoint.y - drawingStrokeWidth / 2,
+            width: drawingStrokeWidth,
+            height: drawingStrokeWidth,
+          }}
+        />
+      )}
+
       {activeDrawingPoints.length > 0 && (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
           <path

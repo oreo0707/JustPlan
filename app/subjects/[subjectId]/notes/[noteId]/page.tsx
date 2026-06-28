@@ -44,6 +44,7 @@ export default function NoteEditorPage() {
   const [drawingTool, setDrawingTool] = useState<"draw" | "erase">("draw");
   const [shapeColor, setShapeColor] = useState("#111827");
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(4);
+  const [eraserStrokeWidth, setEraserStrokeWidth] = useState(18);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showDrawMenu, setShowDrawMenu] = useState(false);
@@ -51,9 +52,11 @@ export default function NoteEditorPage() {
   const [showNoteMenu, setShowNoteMenu] = useState(false);
   const [textContentHeight, setTextContentHeight] = useState(0);
   const [saveRequestId, setSaveRequestId] = useState(0);
+  const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
+  const pendingDrawingCountRef = useRef(0);
   const undoStackRef = useRef<
     Array<{
       content: string;
@@ -226,6 +229,12 @@ export default function NoteEditorPage() {
       }
 
       event.preventDefault();
+
+      if (pendingDrawingCountRef.current > 0) {
+        setDrawingUndoRequestId((current) => current + 1);
+        return;
+      }
+
       applyUndoSnapshot();
     }
 
@@ -290,6 +299,10 @@ export default function NoteEditorPage() {
     );
 
     setData(updatedData);
+  }
+
+  function handlePendingDrawingCountChange(count: number) {
+    pendingDrawingCountRef.current = count;
   }
 
   function getCurrentPageIndex() {
@@ -1303,7 +1316,7 @@ function addTextBox() {
         >
           {isDrawingMode
             ? drawingTool === "erase"
-              ? "Eraser"
+              ? `Eraser ${eraserStrokeWidth}px`
               : `Pencil ${drawingStrokeWidth}px`
             : "Draw"}
         </button>
@@ -1366,17 +1379,27 @@ function addTextBox() {
                   : "mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700"
               }
             >
-              Pencil thickness: {drawingStrokeWidth}px
+              {drawingTool === "erase" ? "Eraser" : "Pencil"} thickness:{" "}
+              {drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth}
+              px
               <input
                 type="range"
                 min="2"
-                max="16"
-                value={drawingStrokeWidth}
+                max={drawingTool === "erase" ? "48" : "16"}
+                value={
+                  drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth
+                }
                 className="mt-2 w-full"
                 onChange={(event) => {
-                  setDrawingStrokeWidth(Number(event.target.value));
+                  const nextWidth = Number(event.target.value);
+
+                  if (drawingTool === "erase") {
+                    setEraserStrokeWidth(nextWidth);
+                  } else {
+                    setDrawingStrokeWidth(nextWidth);
+                  }
+
                   setIsDrawingMode(true);
-                  setDrawingTool("draw");
                   setIsObjectSelectionMode(false);
                   setSelectedObjectIds([]);
                 }}
@@ -1797,7 +1820,7 @@ function addTextBox() {
                 >
                   {isDrawingMode
                     ? drawingTool === "erase"
-                      ? "Eraser"
+                      ? `Eraser ${eraserStrokeWidth}px`
                       : `Pencil ${drawingStrokeWidth}px`
                     : "Draw"}
                 </button>
@@ -1858,17 +1881,31 @@ function addTextBox() {
                     </button>
 
                     <label className="mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700">
-                      Pencil thickness: {drawingStrokeWidth}px
+                      {drawingTool === "erase" ? "Eraser" : "Pencil"} thickness:{" "}
+                      {drawingTool === "erase"
+                        ? eraserStrokeWidth
+                        : drawingStrokeWidth}
+                      px
                       <input
                         type="range"
                         min="2"
-                        max="16"
-                        value={drawingStrokeWidth}
+                        max={drawingTool === "erase" ? "48" : "16"}
+                        value={
+                          drawingTool === "erase"
+                            ? eraserStrokeWidth
+                            : drawingStrokeWidth
+                        }
                         className="mt-2 w-full"
                         onChange={(event) => {
-                          setDrawingStrokeWidth(Number(event.target.value));
+                          const nextWidth = Number(event.target.value);
+
+                          if (drawingTool === "erase") {
+                            setEraserStrokeWidth(nextWidth);
+                          } else {
+                            setDrawingStrokeWidth(nextWidth);
+                          }
+
                           setIsDrawingMode(true);
-                          setDrawingTool("draw");
                           setIsObjectSelectionMode(false);
                           setSelectedObjectIds([]);
                         }}
@@ -2066,9 +2103,13 @@ function addTextBox() {
             drawingMode={isDrawingMode}
             drawingTool={drawingTool}
             drawingColor={shapeColor}
-            drawingStrokeWidth={drawingStrokeWidth}
+            drawingStrokeWidth={
+              drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth
+            }
             theme={data.settings.theme}
             saveRequestId={saveRequestId}
+            undoRequestId={drawingUndoRequestId}
+            onPendingDrawingCountChange={handlePendingDrawingCountChange}
             pageWidth={pageWidth}
             pageHeight={pageHeight}
             pageCount={pageCount}
