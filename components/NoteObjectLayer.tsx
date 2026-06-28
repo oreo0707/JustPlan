@@ -780,11 +780,9 @@ export function NoteObjectLayer({
 
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
-    const drawingElement = event.currentTarget;
     const pointerId = event.pointerId;
 
     const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
@@ -794,10 +792,6 @@ export function NoteObjectLayer({
 
     const firstPoint = getPoint(event);
     if (!isPointInsidePaper(firstPoint)) {
-      if (drawingElement.hasPointerCapture(pointerId)) {
-        drawingElement.releasePointerCapture(pointerId);
-      }
-
       return;
     }
 
@@ -848,15 +842,10 @@ export function NoteObjectLayer({
       const finalPoints = [...activeDrawingPointsRef.current];
       activeDrawingPointsRef.current = [];
       setActiveDrawingPoints([]);
-      drawingElement.removeEventListener("pointermove", handleMove);
-      drawingElement.removeEventListener("pointerrawupdate", handleRawUpdate);
-      drawingElement.removeEventListener("pointerup", finishDrawing);
-      drawingElement.removeEventListener("pointercancel", finishDrawing);
-      drawingElement.removeEventListener("lostpointercapture", finishDrawing);
-
-      if (drawingElement.hasPointerCapture(pointerId)) {
-        drawingElement.releasePointerCapture(pointerId);
-      }
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerrawupdate", handleRawUpdate);
+      window.removeEventListener("pointerup", finishDrawing);
+      window.removeEventListener("pointercancel", finishDrawing);
 
       if (finalPoints.length < 2) return;
 
@@ -889,11 +878,10 @@ export function NoteObjectLayer({
       onSelectionChange([]);
     }
 
-    drawingElement.addEventListener("pointermove", handleMove, { passive: false });
-    drawingElement.addEventListener("pointerrawupdate", handleRawUpdate, { passive: false });
-    drawingElement.addEventListener("pointerup", finishDrawing);
-    drawingElement.addEventListener("pointercancel", finishDrawing);
-    drawingElement.addEventListener("lostpointercapture", finishDrawing);
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerrawupdate", handleRawUpdate, { passive: false });
+    window.addEventListener("pointerup", finishDrawing);
+    window.addEventListener("pointercancel", finishDrawing);
   }
 
   function startLineEndpointDrag(

@@ -252,6 +252,7 @@ export default function NoteEditorPage() {
     setShowNoteMenu(false);
     setShowPagePanel(false);
     setShowAddMenu(false);
+    setShowDrawMenu(false);
     setShowStickerPicker(false);
     setIsObjectSelectionMode(false);
     setIsDrawingMode(false);
@@ -313,27 +314,236 @@ export default function NoteEditorPage() {
     });
   }
 
-  async function shareNoteLink() {
+  function getSafeFileName(fileName: string) {
+    return (
+      fileName
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, "-")
+        .replace(/\s+/g, " ") || "note"
+    );
+  }
+
+  function waitForRenderedFrame() {
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
+  }
+
+  async function waitForImageElement(image: HTMLImageElement) {
+    if (image.decode) {
+      await image.decode().catch(() => undefined);
+      return;
+    }
+
+    if (image.complete) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      image.onload = () => resolve();
+      image.onerror = () => resolve();
+    });
+  }
+
+  async function getImageDataUrl(src: string) {
+    const response = await fetch(src);
+    const blob = await response.blob();
+
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error("Could not read image."));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function embedImagesForPdfExport(container: HTMLElement) {
+    const images = Array.from(container.querySelectorAll("img"));
+    const originalImageSources = images.map((image) => ({
+      image,
+      src: image.getAttribute("src"),
+      srcSet: image.getAttribute("srcset"),
+    }));
+
+    await Promise.all(
+      images.map(async (image) => {
+        const source = image.currentSrc || image.src;
+
+        try {
+          if (source && !source.startsWith("data:")) {
+            image.removeAttribute("srcset");
+            image.src = await getImageDataUrl(source);
+          }
+        } catch {
+          // If an image cannot be embedded, still continue exporting the note.
+        }
+
+        await waitForImageElement(image);
+      })
+    );
+
+    return () => {
+      originalImageSources.forEach(({ image, src, srcSet }) => {
+        if (src === null) {
+          image.removeAttribute("src");
+        } else {
+          image.setAttribute("src", src);
+        }
+
+        if (srcSet === null) {
+          image.removeAttribute("srcset");
+        } else {
+          image.setAttribute("srcset", srcSet);
+        }
+      });
+    };
+  }
+
+  async function handleSharePdf() {
+    const noteCanvas = canvasRef.current;
+
+    if (!noteCanvas) {
+      return;
+    }
+
+    setSelectedObjectIds([]);
     setShowNoteMenu(false);
     setShowPagePanel(false);
     setShowAddMenu(false);
     setShowDrawMenu(false);
     setShowStickerPicker(false);
+    setIsObjectSelectionMode(false);
+    setIsDrawingMode(false);
+
+    await document.fonts?.ready;
+    await waitForRenderedFrame();
+
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import("html2canvas"),
+      import("jspdf"),
+    ]);
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "px",
+      format: [pageWidth, pageHeight],
+      compress: true,
+      hotfixes: ["px_scaling"],
+    });
+    const captureScale = Math.min(window.devicePixelRatio || 2, 2);
+    const originalParent = noteCanvas.parentNode;
+    const originalNextSibling = noteCanvas.nextSibling;
+    const originalStyle = noteCanvas.getAttribute("style");
+    const placeholder = document.createComment("note-pdf-export-placeholder");
+    const exportFrame = document.createElement("div");
+
+    exportFrame.style.position = "fixed";
+    exportFrame.style.left = "0";
+    exportFrame.style.top = "0";
+    exportFrame.style.zIndex = "-1";
+    exportFrame.style.width = `${pageWidth}px`;
+    exportFrame.style.height = `${pageHeight}px`;
+    exportFrame.style.overflow = "hidden";
+    exportFrame.style.background =
+      data.settings.theme === "dark" ? "#111827" : "#ffffff";
+    exportFrame.style.pointerEvents = "none";
+
+    originalParent?.insertBefore(placeholder, noteCanvas);
+    document.body.appendChild(exportFrame);
+    exportFrame.appendChild(noteCanvas);
+
+    let restoreExportImages: (() => void) | null = null;
+
+    try {
+      restoreExportImages = await embedImagesForPdfExport(exportFrame);
+      await waitForRenderedFrame();
+
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+        noteCanvas.style.position = "relative";
+        noteCanvas.style.left = "0";
+        noteCanvas.style.top = "0";
+        noteCanvas.style.width = `${pageWidth}px`;
+        noteCanvas.style.minHeight = canvasMinimumHeight;
+        noteCanvas.style.margin = "0";
+        noteCanvas.style.transform = `translateY(-${pageIndex * pageHeight}px)`;
+        noteCanvas.style.transformOrigin = "top left";
+
+        await waitForRenderedFrame();
+
+        const pageCanvas = await html2canvas(exportFrame, {
+          backgroundColor:
+            data.settings.theme === "dark" ? "#111827" : "#ffffff",
+          scale: captureScale,
+          foreignObjectRendering: true,
+          useCORS: true,
+          allowTaint: true,
+          width: pageWidth,
+          height: pageHeight,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: pageWidth,
+          windowHeight: pageHeight,
+        });
+
+        if (pageIndex > 0) {
+          pdf.addPage([pageWidth, pageHeight], "portrait");
+        }
+
+        pdf.addImage(
+          pageCanvas.toDataURL("image/png"),
+          "PNG",
+          0,
+          0,
+          pageWidth,
+          pageHeight
+        );
+      }
+    } finally {
+      restoreExportImages?.();
+
+      if (originalStyle === null) {
+        noteCanvas.removeAttribute("style");
+      } else {
+        noteCanvas.setAttribute("style", originalStyle);
+      }
+
+      if (originalParent) {
+        originalParent.insertBefore(noteCanvas, originalNextSibling);
+      }
+
+      placeholder.remove();
+      exportFrame.remove();
+    }
 
     const noteTitle = note?.title ?? "Note";
-    const noteUrl = window.location.href;
+    const file = new File(
+      [pdf.output("blob")],
+      `${getSafeFileName(noteTitle)}.pdf`,
+      { type: "application/pdf" }
+    );
 
-    if (navigator.share) {
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
       await navigator.share({
         title: noteTitle,
-        text: `Open this note: ${noteTitle}`,
-        url: noteUrl,
+        files: [file],
       });
       return;
     }
 
-    await navigator.clipboard.writeText(noteUrl);
-    window.alert("Note link copied.");
+    const fileUrl = URL.createObjectURL(file);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = fileUrl;
+    downloadLink.download = file.name;
+    downloadLink.click();
+    URL.revokeObjectURL(fileUrl);
   }
 
   function addSticker(src: string) {
@@ -1362,9 +1572,9 @@ function addTextBox() {
                 <button
                   type="button"
                   className={isDarkNoteTheme ? "mt-3 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800" : "mt-3 w-full rounded-lg border px-3 py-2 text-left text-sm"}
-                  onClick={shareNoteLink}
+                  onClick={handleSharePdf}
                 >
-                  Share note
+                  Share as PDF
                 </button>
 
                 <button
