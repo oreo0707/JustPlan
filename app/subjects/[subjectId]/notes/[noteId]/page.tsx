@@ -327,6 +327,22 @@ export default function NoteEditorPage() {
     });
   }
 
+  function switchToTextMode() {
+    setIsDrawingMode(false);
+    setDrawingTool("draw");
+    setIsObjectSelectionMode(false);
+    setSelectedObjectIds([]);
+    setShowDrawMenu(false);
+  }
+
+  function switchToDrawMode() {
+    setIsDrawingMode(true);
+    setDrawingTool("draw");
+    setIsObjectSelectionMode(false);
+    setSelectedObjectIds([]);
+    setShowDrawMenu(false);
+  }
+
   function getSafeFileName(fileName: string) {
     return (
       fileName
@@ -1567,6 +1583,40 @@ function addTextBox() {
 
             {showNoteMenu && (
               <div className={notePanelClass}>
+                <p className={isDarkNoteTheme ? "mb-2 text-xs font-semibold text-slate-400" : "mb-2 text-xs font-semibold text-gray-500"}>
+                  Note Mode
+                </p>
+
+                <div className="mb-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className={
+                      !isDrawingMode
+                        ? "rounded-lg bg-blue-600 px-2 py-1 text-xs text-white"
+                        : isDarkNoteTheme
+                          ? "rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-100 hover:bg-slate-800"
+                          : "rounded-lg border px-2 py-1 text-xs"
+                    }
+                    onClick={switchToTextMode}
+                  >
+                    Text
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      isDrawingMode && drawingTool === "draw"
+                        ? "rounded-lg bg-blue-600 px-2 py-1 text-xs text-white"
+                        : isDarkNoteTheme
+                          ? "rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-100 hover:bg-slate-800"
+                          : "rounded-lg border px-2 py-1 text-xs"
+                    }
+                    onClick={switchToDrawMode}
+                  >
+                    Draw
+                  </button>
+                </div>
+
                 <p className={isDarkNoteTheme ? "mb-2 text-xs font-semibold text-slate-400" : "mb-2 text-xs font-semibold text-gray-500"}>
                   Note Template
                 </p>

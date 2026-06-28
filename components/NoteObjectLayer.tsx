@@ -304,6 +304,7 @@ export function NoteObjectLayer({
 }: NoteObjectLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
+  const liveDrawingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastHandledSaveRequestIdRef = useRef(0);
   const lastHandledUndoRequestIdRef = useRef(0);
   const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
@@ -313,6 +314,8 @@ export function NoteObjectLayer({
   const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
   const activeDrawingMinDistanceRef = useRef(1);
   const suppressPointerDrawingUntilRef = useRef(0);
+  const canvasDrawingTouchIdRef = useRef<number | null>(null);
+  const canvasDrawingPointerIdRef = useRef<number | null>(null);
   const drawingModeRef = useRef(drawingMode);
   const drawingToolRef = useRef(drawingTool);
   const drawingColorRef = useRef(drawingColor);
@@ -360,6 +363,111 @@ export function NoteObjectLayer({
     });
   }
 
+  function prepareLiveDrawingCanvas() {
+    const canvas = liveDrawingCanvasRef.current;
+    if (!canvas) return null;
+
+    const pixelRatio = window.devicePixelRatio || 1;
+    const targetWidth = Math.round(pageWidth * pixelRatio);
+    const targetHeight = Math.round(drawingHeight * pixelRatio);
+
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      canvas.style.width = `${pageWidth}px`;
+      canvas.style.height = `${drawingHeight}px`;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = drawingColorRef.current;
+    context.lineWidth = drawingStrokeWidthRef.current;
+
+    return context;
+  }
+
+  function clearLiveDrawingCanvas() {
+    const canvas = liveDrawingCanvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function commitDrawingPoints(finalPoints: DrawingPoint[]) {
+    if (finalPoints.length < 2) {
+      clearLiveDrawingCanvas();
+      return;
+    }
+
+    const strokeWidth = drawingStrokeWidthRef.current;
+    const padding = Math.max(6, strokeWidth);
+    const xs = finalPoints.map((point) => point.x);
+    const ys = finalPoints.map((point) => point.y);
+    const left = Math.max(0, Math.min(...xs) - padding);
+    const top = Math.max(0, Math.min(...ys) - padding);
+    const right = Math.max(...xs) + padding;
+    const bottom = Math.max(...ys) + padding;
+
+    const newDrawing: NoteObject = {
+      id: crypto.randomUUID(),
+      type: "drawing",
+      x: left,
+      y: top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+      points: finalPoints.map((point) => ({
+        x: point.x - left,
+        y: point.y - top,
+      })),
+      color: drawingColorRef.current,
+      strokeWidth,
+      flipX: false,
+      flipY: false,
+    };
+
+    pushPendingDrawingUndoSnapshot();
+    setPendingDrawings((current) => [...current, newDrawing]);
+    onSelectionChange([]);
+    clearLiveDrawingCanvas();
+  }
+
+  function addLiveCanvasPoint(nextPoint: DrawingPoint) {
+    if (!isPointInsidePaper(nextPoint)) return;
+
+    const context = prepareLiveDrawingCanvas();
+    if (!context) return;
+
+    const points = activeDrawingPointsRef.current;
+    const previousPoint = points[points.length - 1];
+
+    if (!previousPoint) {
+      points.push(nextPoint);
+      context.beginPath();
+      context.moveTo(nextPoint.x, nextPoint.y);
+      context.lineTo(nextPoint.x + 0.01, nextPoint.y + 0.01);
+      context.stroke();
+      return;
+    }
+
+    const distance = Math.hypot(
+      nextPoint.x - previousPoint.x,
+      nextPoint.y - previousPoint.y
+    );
+
+    if (distance < activeDrawingMinDistanceRef.current) return;
+
+    points.push(nextPoint);
+    context.beginPath();
+    context.moveTo(previousPoint.x, previousPoint.y);
+    context.lineTo(nextPoint.x, nextPoint.y);
+    context.stroke();
+  }
+
   useEffect(() => {
     return () => {
       if (activeDrawingFrameRef.current !== null) {
@@ -374,6 +482,176 @@ export function NoteObjectLayer({
     drawingColorRef.current = drawingColor;
     drawingStrokeWidthRef.current = drawingStrokeWidth;
   }, [drawingColor, drawingMode, drawingStrokeWidth, drawingTool]);
+
+  useEffect(() => {
+    const canvas = liveDrawingCanvasRef.current;
+    if (!canvas) return;
+    const activeCanvas = canvas;
+
+    function getCanvasPoint(clientX: number, clientY: number) {
+      const canvasBounds = activeCanvas.getBoundingClientRect();
+
+      return {
+        x: clientX - canvasBounds.left,
+        y: clientY - canvasBounds.top,
+      };
+    }
+
+    function beginCanvasStroke(id: number, point: DrawingPoint) {
+      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+
+      if (activeDrawingPointerIdRef.current !== null) {
+        commitDrawingPoints([...activeDrawingPointsRef.current]);
+      }
+
+      activeDrawingPointerIdRef.current = id;
+      activeDrawingMinDistanceRef.current = 0.1;
+      activeDrawingPointsRef.current = [];
+      addLiveCanvasPoint(point);
+      onSelectionChange([]);
+    }
+
+    function moveCanvasStroke(id: number, point: DrawingPoint) {
+      if (activeDrawingPointerIdRef.current !== id) return;
+
+      addLiveCanvasPoint(point);
+    }
+
+    function finishCanvasStroke(id: number) {
+      if (activeDrawingPointerIdRef.current !== id) return;
+
+      activeDrawingPointerIdRef.current = null;
+      canvasDrawingPointerIdRef.current = null;
+      canvasDrawingTouchIdRef.current = null;
+      commitDrawingPoints([...activeDrawingPointsRef.current]);
+      activeDrawingPointsRef.current = [];
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 500;
+      canvasDrawingPointerIdRef.current = event.pointerId;
+      beginCanvasStroke(
+        event.pointerId,
+        getCanvasPoint(event.clientX, event.clientY)
+      );
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      if (canvasDrawingPointerIdRef.current !== event.pointerId) return;
+
+      event.preventDefault();
+      const moveEvents =
+        typeof event.getCoalescedEvents === "function"
+          ? event.getCoalescedEvents()
+          : [event];
+
+      moveEvents.forEach((moveEvent) =>
+        moveCanvasStroke(
+          event.pointerId,
+          getCanvasPoint(moveEvent.clientX, moveEvent.clientY)
+        )
+      );
+    }
+
+    function handlePointerEnd(event: PointerEvent) {
+      if (canvasDrawingPointerIdRef.current !== event.pointerId) return;
+
+      event.preventDefault();
+      finishCanvasStroke(event.pointerId);
+    }
+
+    function handleTouchStart(event: TouchEvent) {
+      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
+      canvasDrawingTouchIdRef.current = touch.identifier;
+      beginCanvasStroke(
+        -touch.identifier - 1,
+        getCanvasPoint(touch.clientX, touch.clientY)
+      );
+    }
+
+    function handleTouchMove(event: TouchEvent) {
+      const touchId = canvasDrawingTouchIdRef.current;
+      if (touchId === null) return;
+
+      const touch = Array.from(event.changedTouches).find(
+        (item) => item.identifier === touchId
+      );
+      if (!touch) return;
+
+      event.preventDefault();
+      moveCanvasStroke(
+        -touch.identifier - 1,
+        getCanvasPoint(touch.clientX, touch.clientY)
+      );
+    }
+
+    function handleTouchEnd(event: TouchEvent) {
+      const touchId = canvasDrawingTouchIdRef.current;
+      if (touchId === null) return;
+
+      const touch = Array.from(event.changedTouches).find(
+        (item) => item.identifier === touchId
+      );
+      if (!touch) return;
+
+      event.preventDefault();
+      moveCanvasStroke(
+        -touch.identifier - 1,
+        getCanvasPoint(touch.clientX, touch.clientY)
+      );
+      finishCanvasStroke(-touch.identifier - 1);
+    }
+
+    activeCanvas.addEventListener("pointerdown", handlePointerDown, {
+      passive: false,
+    });
+    window.addEventListener("pointermove", handlePointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", handlePointerEnd, {
+      passive: false,
+    });
+    window.addEventListener("pointercancel", handlePointerEnd, {
+      passive: false,
+    });
+    activeCanvas.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    });
+    window.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+    });
+    window.addEventListener("touchend", handleTouchEnd, {
+      passive: false,
+    });
+    window.addEventListener("touchcancel", handleTouchEnd, {
+      passive: false,
+    });
+
+    return () => {
+      activeCanvas.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+      activeCanvas.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
+    };
+    // Canvas drawing intentionally reads current settings through refs so the
+    // listeners stay stable while the user writes quickly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawingMode, drawingTool]);
 
   useEffect(() => {
     if (
@@ -971,10 +1249,12 @@ export function NoteObjectLayer({
     if (!drawingLayer) return;
 
     function handleNativePointerDown(event: PointerEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       startDrawing(event);
     }
 
     function handleNativePointerMove(event: PointerEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       if (activeDrawingPointerIdRef.current !== event.pointerId) return;
 
       event.preventDefault();
@@ -996,6 +1276,7 @@ export function NoteObjectLayer({
     }
 
     function handleNativePointerEnd(event: PointerEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       if (activeDrawingPointerIdRef.current !== event.pointerId) return;
 
       event.preventDefault();
@@ -1013,6 +1294,7 @@ export function NoteObjectLayer({
     }
 
     function handleNativeTouchStart(event: TouchEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
 
       const touch = event.changedTouches[0];
@@ -1037,6 +1319,7 @@ export function NoteObjectLayer({
     }
 
     function handleNativeTouchMove(event: TouchEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       const activeTouchId = activeDrawingPointerIdRef.current;
 
       if (activeTouchId === null || activeTouchId >= 0) return;
@@ -1054,6 +1337,7 @@ export function NoteObjectLayer({
     }
 
     function handleNativeTouchEnd(event: TouchEvent) {
+      if (event.target === liveDrawingCanvasRef.current) return;
       const activeTouchId = activeDrawingPointerIdRef.current;
 
       if (activeTouchId === null || activeTouchId >= 0) return;
@@ -1313,6 +1597,21 @@ export function NoteObjectLayer({
         startSelectionBox(event);
       }}
     >
+      {drawingMode && drawingTool === "draw" && (
+        <canvas
+          ref={liveDrawingCanvasRef}
+          className="absolute inset-0 z-30 h-full w-full touch-none"
+          style={{
+            width: pageWidth,
+            height: drawingHeight,
+            touchAction: "none",
+            WebkitUserSelect: "none",
+            userSelect: "none",
+            WebkitTouchCallout: "none",
+          }}
+        />
+      )}
+
       {drawingMode && drawingTool === "erase" && eraserPoint && (
         <div
           className="pointer-events-none absolute rounded-full border-2 border-blue-500 bg-blue-400/15"
