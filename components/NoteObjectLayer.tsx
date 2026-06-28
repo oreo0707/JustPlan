@@ -309,6 +309,7 @@ export function NoteObjectLayer({
   const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
   const activeDrawingFrameRef = useRef<number | null>(null);
   const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
+  const startDrawingRef = useRef<((event: PointerEvent) => void) | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
@@ -836,7 +837,7 @@ export function NoteObjectLayer({
   }
 
   function startDrawing(event: PointerEvent | React.PointerEvent<HTMLDivElement>) {
-    if (!drawingMode) return;
+    if (!drawingMode || drawingTool === "erase") return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -946,23 +947,28 @@ export function NoteObjectLayer({
   }
 
   useEffect(() => {
-    if (!drawingMode || drawingTool === "erase") return;
+    startDrawingRef.current = (event) => startDrawing(event);
+  });
 
+  useEffect(() => {
     const drawingLayer = layerRef.current;
     if (!drawingLayer) return;
 
     function handleNativePointerDown(event: PointerEvent) {
-      startDrawing(event);
+      startDrawingRef.current?.(event);
     }
 
     drawingLayer.addEventListener("pointerdown", handleNativePointerDown, {
       passive: false,
+      capture: true,
     });
 
     return () => {
-      drawingLayer.removeEventListener("pointerdown", handleNativePointerDown);
+      drawingLayer.removeEventListener("pointerdown", handleNativePointerDown, {
+        capture: true,
+      });
     };
-  });
+  }, []);
 
   function startLineEndpointDrag(
     event: React.PointerEvent<HTMLDivElement>,
