@@ -1,9 +1,19 @@
 export function toDateInputValue(date: Date) {
-  return date.toISOString().split("T")[0];
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
 export function getTodayDateString() {
   return toDateInputValue(new Date());
+}
+
+export function parseDateInputValue(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+
+  return new Date(year, month - 1, day);
 }
 
 export function addDays(date: Date, days: number) {
@@ -13,8 +23,8 @@ export function addDays(date: Date, days: number) {
 }
 
 export function getDaysUntil(dateString: string) {
-  const today = new Date(getTodayDateString());
-  const targetDate = new Date(dateString);
+  const today = parseDateInputValue(getTodayDateString());
+  const targetDate = parseDateInputValue(dateString);
 
   const difference = targetDate.getTime() - today.getTime();
   return Math.ceil(difference / (1000 * 60 * 60 * 24));
@@ -48,7 +58,6 @@ export function getMonthDays(date: Date) {
   const year = date.getFullYear();
   const month = date.getMonth();
 
-  const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
 
   const days = [];

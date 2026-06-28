@@ -54,6 +54,13 @@ export default function NoteEditorPage() {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
+  const undoStackRef = useRef<
+    Array<{
+      content: string;
+      objects: NoteObject[];
+      template: NoteTemplate;
+    }>
+  >([]);
   const pageWidth = 794;
   const pageHeight = 1123;
 
@@ -108,6 +115,29 @@ export default function NoteEditorPage() {
     };
   }, [showAddMenu, showStickerPicker]);
 
+  function toggleExpandedNoteBox(
+    target: "note" | "pages" | "add" | "draw"
+  ) {
+    const isTargetOpen =
+      target === "note"
+        ? showNoteMenu
+        : target === "pages"
+          ? showPagePanel
+          : target === "add"
+            ? showAddMenu
+            : showDrawMenu;
+    const shouldOpenTarget = !isTargetOpen;
+
+    setShowNoteMenu(shouldOpenTarget && target === "note");
+    setShowPagePanel(shouldOpenTarget && target === "pages");
+    setShowAddMenu(shouldOpenTarget && target === "add");
+    setShowDrawMenu(shouldOpenTarget && target === "draw");
+
+    if (!(shouldOpenTarget && target === "add")) {
+      setShowStickerPicker(false);
+    }
+  }
+
   useEffect(() => {
     if (!hasLoaded) {
       return;
@@ -130,6 +160,79 @@ export default function NoteEditorPage() {
 
     return () => cancelAnimationFrame(frameId);
   }, [data, hasLoaded, subjectId, noteId]);
+
+  function pushUndoSnapshot() {
+    const latestSnapshot = undoStackRef.current.at(-1);
+    const nextSnapshot = {
+      content,
+      objects,
+      template,
+    };
+
+    if (
+      latestSnapshot &&
+      latestSnapshot.content === nextSnapshot.content &&
+      latestSnapshot.template === nextSnapshot.template &&
+      JSON.stringify(latestSnapshot.objects) === JSON.stringify(nextSnapshot.objects)
+    ) {
+      return;
+    }
+
+    undoStackRef.current = [...undoStackRef.current.slice(-49), nextSnapshot];
+  }
+
+  function applyUndoSnapshot() {
+    const snapshot = undoStackRef.current.pop();
+    if (!snapshot) return;
+
+    setContent(snapshot.content);
+    setObjects(snapshot.objects);
+    setTemplate(snapshot.template);
+
+    let updatedData = updateNoteContent(
+      data,
+      subjectId,
+      noteId,
+      snapshot.content
+    );
+    updatedData = updateNoteObjects(
+      updatedData,
+      subjectId,
+      noteId,
+      snapshot.objects
+    );
+    updatedData = updateNoteTemplate(
+      updatedData,
+      subjectId,
+      noteId,
+      snapshot.template
+    );
+
+    setData(updatedData);
+    setSelectedObjectIds([]);
+  }
+
+  useEffect(() => {
+    function handleUndoShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        target?.isContentEditable ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT";
+
+      if (!event.ctrlKey || event.key.toLowerCase() !== "z" || isEditableTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      applyUndoSnapshot();
+    }
+
+    window.addEventListener("keydown", handleUndoShortcut);
+
+    return () => window.removeEventListener("keydown", handleUndoShortcut);
+  });
 
   function handleSaveNote() {
     setSaveRequestId((current) => current + 1);
@@ -160,6 +263,7 @@ export default function NoteEditorPage() {
   
 
   function handleChangeTemplate(newTemplate: NoteTemplate) {
+  pushUndoSnapshot();
   setTemplate(newTemplate);
 
   const updatedData = updateNoteTemplate(
@@ -174,6 +278,7 @@ export default function NoteEditorPage() {
   
 
   function handleChangeObjects(newObjects: NoteObject[]) {
+    pushUndoSnapshot();
     setObjects(newObjects);
 
     const updatedData = updateNoteObjects(
@@ -208,6 +313,29 @@ export default function NoteEditorPage() {
     });
   }
 
+  async function shareNoteLink() {
+    setShowNoteMenu(false);
+    setShowPagePanel(false);
+    setShowAddMenu(false);
+    setShowDrawMenu(false);
+    setShowStickerPicker(false);
+
+    const noteTitle = note?.title ?? "Note";
+    const noteUrl = window.location.href;
+
+    if (navigator.share) {
+      await navigator.share({
+        title: noteTitle,
+        text: `Open this note: ${noteTitle}`,
+        url: noteUrl,
+      });
+      return;
+    }
+
+    await navigator.clipboard.writeText(noteUrl);
+    window.alert("Note link copied.");
+  }
+
   function addSticker(src: string) {
     const position = getCenteredObjectPosition(120, 120);
     const newSticker: NoteObject = {
@@ -225,6 +353,7 @@ export default function NoteEditorPage() {
     };
 
     handleChangeObjects([...objects, newSticker]);
+    setSelectedObjectIds([newSticker.id]);
   }
 
   async function addImageObject(src: string, width: number, height: number) {
@@ -278,6 +407,7 @@ export default function NoteEditorPage() {
     };
 
     handleChangeObjects([...objects, newShape]);
+    setSelectedObjectIds([newShape.id]);
   }
 
   function snapToLineGrid(value: number) {
@@ -798,8 +928,8 @@ function addTextBox() {
     ? "mt-1 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100"
     : "mt-1 w-full rounded-lg border px-3 py-2 text-sm";
   const noteStickerGridClass = isDarkNoteTheme
-    ? "mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 p-2"
-    : "mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2";
+    ? "mt-2 grid max-h-96 w-[28rem] grid-cols-4 gap-3 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 p-3"
+    : "mt-2 grid max-h-96 w-[28rem] grid-cols-4 gap-3 overflow-y-auto rounded-lg border bg-gray-50 p-3";
   const noteStickerButtonClass = isDarkNoteTheme
     ? "rounded-lg border border-slate-700 bg-slate-900 p-1 text-left hover:bg-slate-800"
     : "rounded-lg border bg-white p-1 text-left hover:bg-gray-100";
@@ -816,8 +946,8 @@ function addTextBox() {
     ? "no-print fixed left-4 top-4 z-[60] rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-base leading-none text-slate-100 shadow-sm hover:bg-slate-800"
     : "no-print fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm";
   const notePanelClass = isDarkNoteTheme
-    ? "absolute right-0 top-11 z-50 w-52 rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
-    : "absolute right-0 top-11 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg";
+    ? "absolute right-0 top-17 z-50 w-52 rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
+    : "absolute right-0 top-17 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg";
   const noteSidePanelClass = isDarkNoteTheme
     ? "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
     : "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg";
@@ -835,7 +965,7 @@ function addTextBox() {
               ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
               : noteToolbarButtonClass
           }
-          onClick={() => setShowAddMenu((current) => !current)}
+          onClick={() => toggleExpandedNoteBox("add")}
         >
           Add
         </button>
@@ -941,7 +1071,7 @@ function addTextBox() {
                     <img
                       src={sticker.src}
                       alt={sticker.label}
-                      className="mx-auto h-12 w-12 object-contain"
+                      className="mx-auto h-20 w-20 object-contain"
                     />
                   </button>
                 ))}
@@ -959,7 +1089,7 @@ function addTextBox() {
               ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
               : noteToolbarButtonClass
           }
-          onClick={() => setShowDrawMenu((current) => !current)}
+          onClick={() => toggleExpandedNoteBox("draw")}
         >
           {isDrawingMode
             ? drawingTool === "erase"
@@ -1182,7 +1312,7 @@ function addTextBox() {
           <button
             type="button"
             className={noteTopButtonClass}
-            onClick={() => setShowNoteMenu((current) => !current)}
+            onClick={() => toggleExpandedNoteBox("note")}
             title="More"
           >
             <span
@@ -1196,7 +1326,7 @@ function addTextBox() {
             <button
               type="button"
               className={noteTopButtonClass}
-              onClick={() => setShowPagePanel((current) => !current)}
+              onClick={() => toggleExpandedNoteBox("pages")}
               title="Pages"
             >
               ...
@@ -1232,14 +1362,7 @@ function addTextBox() {
                 <button
                   type="button"
                   className={isDarkNoteTheme ? "mt-3 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800" : "mt-3 w-full rounded-lg border px-3 py-2 text-left text-sm"}
-                  onClick={async () => {
-                    if (navigator.share) {
-                      await navigator.share({ title: note.title, text: content });
-                    } else {
-                      await navigator.clipboard.writeText(content);
-                      window.alert("Note content copied.");
-                    }
-                  }}
+                  onClick={shareNoteLink}
                 >
                   Share note
                 </button>
@@ -1319,7 +1442,7 @@ function addTextBox() {
                       ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
                       : "rounded-lg border px-3 py-1 text-sm"
                   }
-                  onClick={() => setShowAddMenu((current) => !current)}
+                  onClick={() => toggleExpandedNoteBox("add")}
                 >
                   Add
                 </button>
@@ -1411,7 +1534,7 @@ function addTextBox() {
                     </select>
 
                     {showStickerPicker && (
-                      <div className="mt-2 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-lg border bg-gray-50 p-2">
+                      <div className="mt-2 grid max-h-96 w-[28rem] grid-cols-4 gap-3 overflow-y-auto rounded-lg border bg-gray-50 p-3">
                         {stickerOptions.map((sticker) => (
                           <button
                             key={sticker.src}
@@ -1426,7 +1549,7 @@ function addTextBox() {
                             <img
                               src={sticker.src}
                               alt={sticker.label}
-                              className="mx-auto h-12 w-12 object-contain"
+                              className="mx-auto h-20 w-20 object-contain"
                             />
                           </button>
                         ))}
@@ -1460,7 +1583,7 @@ function addTextBox() {
                       ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
                       : "rounded-lg border px-3 py-1 text-sm"
                   }
-                  onClick={() => setShowDrawMenu((current) => !current)}
+                  onClick={() => toggleExpandedNoteBox("draw")}
                 >
                   {isDrawingMode
                     ? drawingTool === "erase"
@@ -1560,7 +1683,7 @@ function addTextBox() {
                       Choose a sticker
                     </p>
 
-                    <div className="grid max-h-64 grid-cols-3 gap-3 overflow-y-auto">
+                    <div className="grid max-h-96 grid-cols-3 gap-4 overflow-y-auto">
                       {stickerOptions.map((sticker) => (
                         <button
                           key={sticker.src}
@@ -1574,7 +1697,7 @@ function addTextBox() {
                           <img
                             src={sticker.src}
                             alt={sticker.label}
-                            className="mx-auto h-16 w-16 object-contain"
+                            className="mx-auto h-24 w-24 object-contain"
                           />
 
                           <p className="mt-1 truncate text-xs font-medium text-gray-800">

@@ -298,10 +298,14 @@ export function NoteObjectLayer({
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
   const lastHandledSaveRequestIdRef = useRef(0);
+  const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
+  const activeDrawingFrameRef = useRef<number | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
+  const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
+  const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
   const isDark = theme === "dark";
   const objectControlPanelClass = isDark
     ? "pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-sm"
@@ -328,6 +332,23 @@ export function NoteObjectLayer({
       point.y <= drawingHeight
     );
   }
+
+  function scheduleActiveDrawingPaint() {
+    if (activeDrawingFrameRef.current !== null) return;
+
+    activeDrawingFrameRef.current = window.requestAnimationFrame(() => {
+      activeDrawingFrameRef.current = null;
+      setActiveDrawingPoints([...activeDrawingPointsRef.current]);
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (activeDrawingFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeDrawingFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -780,19 +801,21 @@ export function NoteObjectLayer({
       return;
     }
 
-    let points = [firstPoint];
-    setActiveDrawingPoints(points);
+    const minPointDistance = event.pointerType === "pen" ? 0.35 : 1;
+    activeDrawingPointsRef.current = [firstPoint];
+    setActiveDrawingPoints([firstPoint]);
     onSelectionChange([]);
 
     function addPoint(nextPoint: DrawingPoint) {
       if (!isPointInsidePaper(nextPoint)) return;
 
+      const points = activeDrawingPointsRef.current;
       const lastPoint = points[points.length - 1];
       const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
 
-      if (distance < 1.25) return;
+      if (distance < minPointDistance) return;
 
-      points = [...points, nextPoint];
+      points.push(nextPoint);
     }
 
     function handleMove(moveEvent: PointerEvent) {
@@ -806,15 +829,27 @@ export function NoteObjectLayer({
           : [moveEvent];
 
       moveEvents.forEach((pointerEvent) => addPoint(getPoint(pointerEvent)));
-      setActiveDrawingPoints(points);
+      scheduleActiveDrawingPaint();
+    }
+
+    function handleRawUpdate(rawEvent: Event) {
+      handleMove(rawEvent as PointerEvent);
     }
 
     function finishDrawing(finishEvent: PointerEvent) {
       if (finishEvent.pointerId !== pointerId) return;
 
       finishEvent.preventDefault();
+      if (activeDrawingFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeDrawingFrameRef.current);
+        activeDrawingFrameRef.current = null;
+      }
+
+      const finalPoints = [...activeDrawingPointsRef.current];
+      activeDrawingPointsRef.current = [];
       setActiveDrawingPoints([]);
       drawingElement.removeEventListener("pointermove", handleMove);
+      drawingElement.removeEventListener("pointerrawupdate", handleRawUpdate);
       drawingElement.removeEventListener("pointerup", finishDrawing);
       drawingElement.removeEventListener("pointercancel", finishDrawing);
       drawingElement.removeEventListener("lostpointercapture", finishDrawing);
@@ -823,11 +858,11 @@ export function NoteObjectLayer({
         drawingElement.releasePointerCapture(pointerId);
       }
 
-      if (points.length < 2) return;
+      if (finalPoints.length < 2) return;
 
       const padding = Math.max(6, drawingStrokeWidth);
-      const xs = points.map((point) => point.x);
-      const ys = points.map((point) => point.y);
+      const xs = finalPoints.map((point) => point.x);
+      const ys = finalPoints.map((point) => point.y);
       const left = Math.max(0, Math.min(...xs) - padding);
       const top = Math.max(0, Math.min(...ys) - padding);
       const right = Math.max(...xs) + padding;
@@ -840,7 +875,7 @@ export function NoteObjectLayer({
         y: top,
         width: Math.max(1, right - left),
         height: Math.max(1, bottom - top),
-        points: points.map((point) => ({
+        points: finalPoints.map((point) => ({
           x: point.x - left,
           y: point.y - top,
         })),
@@ -855,6 +890,7 @@ export function NoteObjectLayer({
     }
 
     drawingElement.addEventListener("pointermove", handleMove, { passive: false });
+    drawingElement.addEventListener("pointerrawupdate", handleRawUpdate, { passive: false });
     drawingElement.addEventListener("pointerup", finishDrawing);
     drawingElement.addEventListener("pointercancel", finishDrawing);
     drawingElement.addEventListener("lostpointercapture", finishDrawing);
@@ -1444,7 +1480,68 @@ export function NoteObjectLayer({
               </svg>
             )}
 
-            {selected && hasSingleSelection && isVertexShape(object) &&
+            {selected && hasSingleSelection && isVertexShape(object) && (
+              <>
+                <button
+                  type="button"
+                  className={
+                    isDark
+                      ? "pointer-events-auto absolute -top-7 left-0 rounded-md bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm ring-1 ring-slate-700"
+                      : "pointer-events-auto absolute -top-7 left-0 rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                  }
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setOpenShapeMenuId((current) =>
+                      current === object.id ? null : object.id
+                    );
+                  }}
+                >
+                  ...
+                </button>
+
+                {openShapeMenuId === object.id && (
+                  <div
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute -top-7 left-12 z-30 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+                        : "pointer-events-auto absolute -top-7 left-12 z-30 flex items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                    }
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className={
+                        shapeEditMode === "points"
+                          ? "rounded bg-blue-600 px-2 py-1 text-white"
+                          : objectControlButtonClass
+                      }
+                      onClick={() => setShapeEditMode("points")}
+                    >
+                      Points
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        shapeEditMode === "resize"
+                          ? "rounded bg-blue-600 px-2 py-1 text-white"
+                          : objectControlButtonClass
+                      }
+                      onClick={() => setShapeEditMode("resize")}
+                    >
+                      Resize
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {selected && hasSingleSelection && isVertexShape(object) && shapeEditMode === "points" &&
               shapeVertices.map((vertex, index) => (
                 <div
                   key={`${object.id}-vertex-${index}`}
@@ -1484,6 +1581,15 @@ export function NoteObjectLayer({
                       }
                     />
                   </>
+                )}
+                {isVertexShape(object) && shapeEditMode === "resize" && (
+                  <div
+                    className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                    title="Resize proportionally"
+                    onPointerDown={(event) =>
+                      startResize(event, object, "proportional")
+                    }
+                  />
                 )}
                 {!isVertexShape(object) &&
                   object.type !== "image" &&
