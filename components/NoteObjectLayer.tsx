@@ -309,7 +309,13 @@ export function NoteObjectLayer({
   const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
   const activeDrawingFrameRef = useRef<number | null>(null);
   const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
-  const startDrawingRef = useRef<((event: PointerEvent) => void) | null>(null);
+  const activeDrawingPointerIdRef = useRef<number | null>(null);
+  const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
+  const activeDrawingMinDistanceRef = useRef(1);
+  const drawingModeRef = useRef(drawingMode);
+  const drawingToolRef = useRef(drawingTool);
+  const drawingColorRef = useRef(drawingColor);
+  const drawingStrokeWidthRef = useRef(drawingStrokeWidth);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
@@ -360,6 +366,13 @@ export function NoteObjectLayer({
       }
     };
   }, []);
+
+  useEffect(() => {
+    drawingModeRef.current = drawingMode;
+    drawingToolRef.current = drawingTool;
+    drawingColorRef.current = drawingColor;
+    drawingStrokeWidthRef.current = drawingStrokeWidth;
+  }, [drawingColor, drawingMode, drawingStrokeWidth, drawingTool]);
 
   useEffect(() => {
     if (
@@ -836,130 +849,165 @@ export function NoteObjectLayer({
     erasingElement.addEventListener("lostpointercapture", finishErasing);
   }
 
-  function startDrawing(event: PointerEvent | React.PointerEvent<HTMLDivElement>) {
-    if (!drawingMode || drawingTool === "erase") return;
+  function getActiveDrawingPoint(pointerEvent: PointerEvent) {
+    const layerBounds = activeDrawingBoundsRef.current;
+    if (!layerBounds) return null;
+
+    return {
+      x: pointerEvent.clientX - layerBounds.left,
+      y: pointerEvent.clientY - layerBounds.top,
+    };
+  }
+
+  function addActiveDrawingPoint(nextPoint: DrawingPoint) {
+    if (!isPointInsidePaper(nextPoint)) return;
+
+    const points = activeDrawingPointsRef.current;
+    const lastPoint = points[points.length - 1];
+
+    if (!lastPoint) {
+      points.push(nextPoint);
+      return;
+    }
+
+    const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
+
+    if (distance < activeDrawingMinDistanceRef.current) return;
+
+    points.push(nextPoint);
+  }
+
+  function finishActiveDrawing(pointerId: number) {
+    if (activeDrawingPointerIdRef.current !== pointerId) return;
+
+    activeDrawingPointerIdRef.current = null;
+    activeDrawingBoundsRef.current = null;
+
+    if (activeDrawingFrameRef.current !== null) {
+      window.cancelAnimationFrame(activeDrawingFrameRef.current);
+      activeDrawingFrameRef.current = null;
+    }
+
+    const finalPoints = [...activeDrawingPointsRef.current];
+    activeDrawingPointsRef.current = [];
+    setActiveDrawingPoints([]);
+
+    if (finalPoints.length < 2) return;
+
+    const strokeWidth = drawingStrokeWidthRef.current;
+    const padding = Math.max(6, strokeWidth);
+    const xs = finalPoints.map((point) => point.x);
+    const ys = finalPoints.map((point) => point.y);
+    const left = Math.max(0, Math.min(...xs) - padding);
+    const top = Math.max(0, Math.min(...ys) - padding);
+    const right = Math.max(...xs) + padding;
+    const bottom = Math.max(...ys) + padding;
+
+    const newDrawing: NoteObject = {
+      id: crypto.randomUUID(),
+      type: "drawing",
+      x: left,
+      y: top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+      points: finalPoints.map((point) => ({
+        x: point.x - left,
+        y: point.y - top,
+      })),
+      color: drawingColorRef.current,
+      strokeWidth,
+      flipX: false,
+      flipY: false,
+    };
+
+    pushPendingDrawingUndoSnapshot();
+    setPendingDrawings((current) => [...current, newDrawing]);
+    onSelectionChange([]);
+  }
+
+  function startDrawing(event: PointerEvent) {
+    if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
 
     event.preventDefault();
     event.stopPropagation();
 
+    if (activeDrawingPointerIdRef.current !== null) {
+      finishActiveDrawing(activeDrawingPointerIdRef.current);
+    }
+
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
-    const pointerId = event.pointerId;
 
-    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
-      x: pointerEvent.clientX - layerBounds.left,
-      y: pointerEvent.clientY - layerBounds.top,
-    });
+    activeDrawingBoundsRef.current = layerBounds;
+    activeDrawingMinDistanceRef.current = event.pointerType === "pen" ? 0.1 : 1;
 
-    const firstPoint = getPoint(event);
+    const firstPoint = {
+      x: event.clientX - layerBounds.left,
+      y: event.clientY - layerBounds.top,
+    };
+
     if (!isPointInsidePaper(firstPoint)) {
       return;
     }
 
-    const minPointDistance = event.pointerType === "pen" ? 0.35 : 1;
+    activeDrawingPointerIdRef.current = event.pointerId;
     activeDrawingPointsRef.current = [firstPoint];
     setActiveDrawingPoints([firstPoint]);
     onSelectionChange([]);
-
-    function addPoint(nextPoint: DrawingPoint) {
-      if (!isPointInsidePaper(nextPoint)) return;
-
-      const points = activeDrawingPointsRef.current;
-      const lastPoint = points[points.length - 1];
-      const distance = Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y);
-
-      if (distance < minPointDistance) return;
-
-      points.push(nextPoint);
-    }
-
-    function handleMove(moveEvent: PointerEvent) {
-      if (moveEvent.pointerId !== pointerId) return;
-
-      moveEvent.preventDefault();
-
-      const moveEvents =
-        typeof moveEvent.getCoalescedEvents === "function"
-          ? moveEvent.getCoalescedEvents()
-          : [moveEvent];
-
-      moveEvents.forEach((pointerEvent) => addPoint(getPoint(pointerEvent)));
-      scheduleActiveDrawingPaint();
-    }
-
-    function handleRawUpdate(rawEvent: Event) {
-      handleMove(rawEvent as PointerEvent);
-    }
-
-    function finishDrawing(finishEvent: PointerEvent) {
-      if (finishEvent.pointerId !== pointerId) return;
-
-      finishEvent.preventDefault();
-      if (activeDrawingFrameRef.current !== null) {
-        window.cancelAnimationFrame(activeDrawingFrameRef.current);
-        activeDrawingFrameRef.current = null;
-      }
-
-      const finalPoints = [...activeDrawingPointsRef.current];
-      activeDrawingPointsRef.current = [];
-      setActiveDrawingPoints([]);
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerrawupdate", handleRawUpdate);
-      window.removeEventListener("pointerup", finishDrawing);
-      window.removeEventListener("pointercancel", finishDrawing);
-
-      if (finalPoints.length < 2) return;
-
-      const padding = Math.max(6, drawingStrokeWidth);
-      const xs = finalPoints.map((point) => point.x);
-      const ys = finalPoints.map((point) => point.y);
-      const left = Math.max(0, Math.min(...xs) - padding);
-      const top = Math.max(0, Math.min(...ys) - padding);
-      const right = Math.max(...xs) + padding;
-      const bottom = Math.max(...ys) + padding;
-
-      const newDrawing: NoteObject = {
-        id: crypto.randomUUID(),
-        type: "drawing",
-        x: left,
-        y: top,
-        width: Math.max(1, right - left),
-        height: Math.max(1, bottom - top),
-        points: finalPoints.map((point) => ({
-          x: point.x - left,
-          y: point.y - top,
-        })),
-        color: drawingColor,
-        strokeWidth: drawingStrokeWidth,
-        flipX: false,
-        flipY: false,
-      };
-
-      pushPendingDrawingUndoSnapshot();
-      setPendingDrawings((current) => [...current, newDrawing]);
-      onSelectionChange([]);
-    }
-
-    window.addEventListener("pointermove", handleMove, { passive: false });
-    window.addEventListener("pointerrawupdate", handleRawUpdate, { passive: false });
-    window.addEventListener("pointerup", finishDrawing);
-    window.addEventListener("pointercancel", finishDrawing);
   }
-
-  useEffect(() => {
-    startDrawingRef.current = (event) => startDrawing(event);
-  });
 
   useEffect(() => {
     const drawingLayer = layerRef.current;
     if (!drawingLayer) return;
 
     function handleNativePointerDown(event: PointerEvent) {
-      startDrawingRef.current?.(event);
+      startDrawing(event);
+    }
+
+    function handleNativePointerMove(event: PointerEvent) {
+      if (activeDrawingPointerIdRef.current !== event.pointerId) return;
+
+      event.preventDefault();
+
+      const moveEvents =
+        typeof event.getCoalescedEvents === "function"
+          ? event.getCoalescedEvents()
+          : [event];
+
+      moveEvents.forEach((pointerEvent) => {
+        const point = getActiveDrawingPoint(pointerEvent);
+        if (point) addActiveDrawingPoint(point);
+      });
+      scheduleActiveDrawingPaint();
+    }
+
+    function handleNativeRawUpdate(event: Event) {
+      handleNativePointerMove(event as PointerEvent);
+    }
+
+    function handleNativePointerEnd(event: PointerEvent) {
+      if (activeDrawingPointerIdRef.current !== event.pointerId) return;
+
+      event.preventDefault();
+      finishActiveDrawing(event.pointerId);
     }
 
     drawingLayer.addEventListener("pointerdown", handleNativePointerDown, {
       passive: false,
+      capture: true,
+    });
+    window.addEventListener("pointermove", handleNativePointerMove, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("pointerrawupdate", handleNativeRawUpdate, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("pointerup", handleNativePointerEnd, {
+      capture: true,
+    });
+    window.addEventListener("pointercancel", handleNativePointerEnd, {
       capture: true,
     });
 
@@ -967,7 +1015,22 @@ export function NoteObjectLayer({
       drawingLayer.removeEventListener("pointerdown", handleNativePointerDown, {
         capture: true,
       });
+      window.removeEventListener("pointermove", handleNativePointerMove, {
+        capture: true,
+      });
+      window.removeEventListener("pointerrawupdate", handleNativeRawUpdate, {
+        capture: true,
+      });
+      window.removeEventListener("pointerup", handleNativePointerEnd, {
+        capture: true,
+      });
+      window.removeEventListener("pointercancel", handleNativePointerEnd, {
+        capture: true,
+      });
     };
+    // The native drawing listeners must stay attached once; drawing state is read
+    // through refs so fast Apple Pencil strokes are not missed during re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startLineEndpointDrag(
