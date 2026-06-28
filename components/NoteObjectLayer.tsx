@@ -312,6 +312,7 @@ export function NoteObjectLayer({
   const activeDrawingPointerIdRef = useRef<number | null>(null);
   const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
   const activeDrawingMinDistanceRef = useRef(1);
+  const suppressPointerDrawingUntilRef = useRef(0);
   const drawingModeRef = useRef(drawingMode);
   const drawingToolRef = useRef(drawingTool);
   const drawingColorRef = useRef(drawingColor);
@@ -925,35 +926,44 @@ export function NoteObjectLayer({
     onSelectionChange([]);
   }
 
-  function startDrawing(event: PointerEvent) {
-    if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
-
-    event.preventDefault();
-    event.stopPropagation();
+  function startDrawingStroke(
+    pointerId: number,
+    firstPoint: DrawingPoint,
+    minPointDistance: number
+  ) {
+    if (!isPointInsidePaper(firstPoint)) {
+      return;
+    }
 
     if (activeDrawingPointerIdRef.current !== null) {
       finishActiveDrawing(activeDrawingPointerIdRef.current);
     }
 
+    activeDrawingPointerIdRef.current = pointerId;
+    activeDrawingMinDistanceRef.current = minPointDistance;
+    activeDrawingPointsRef.current = [firstPoint];
+    setActiveDrawingPoints([firstPoint]);
+    onSelectionChange([]);
+  }
+
+  function startDrawing(event: PointerEvent) {
+    if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
+    if (Date.now() < suppressPointerDrawingUntilRef.current) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
 
     activeDrawingBoundsRef.current = layerBounds;
-    activeDrawingMinDistanceRef.current = event.pointerType === "pen" ? 0.1 : 1;
 
     const firstPoint = {
       x: event.clientX - layerBounds.left,
       y: event.clientY - layerBounds.top,
     };
 
-    if (!isPointInsidePaper(firstPoint)) {
-      return;
-    }
-
-    activeDrawingPointerIdRef.current = event.pointerId;
-    activeDrawingPointsRef.current = [firstPoint];
-    setActiveDrawingPoints([firstPoint]);
-    onSelectionChange([]);
+    startDrawingStroke(event.pointerId, firstPoint, event.pointerType === "pen" ? 0.1 : 1);
   }
 
   useEffect(() => {
@@ -992,7 +1002,79 @@ export function NoteObjectLayer({
       finishActiveDrawing(event.pointerId);
     }
 
+    function getTouchDrawingPoint(touch: Touch) {
+      const layerBounds = activeDrawingBoundsRef.current;
+      if (!layerBounds) return null;
+
+      return {
+        x: touch.clientX - layerBounds.left,
+        y: touch.clientY - layerBounds.top,
+      };
+    }
+
+    function handleNativeTouchStart(event: TouchEvent) {
+      if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
+
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
+
+      const layerBounds = layerRef.current?.getBoundingClientRect();
+      if (!layerBounds) return;
+
+      activeDrawingBoundsRef.current = layerBounds;
+      startDrawingStroke(
+        -touch.identifier - 1,
+        {
+          x: touch.clientX - layerBounds.left,
+          y: touch.clientY - layerBounds.top,
+        },
+        0.1
+      );
+    }
+
+    function handleNativeTouchMove(event: TouchEvent) {
+      const activeTouchId = activeDrawingPointerIdRef.current;
+
+      if (activeTouchId === null || activeTouchId >= 0) return;
+
+      event.preventDefault();
+
+      Array.from(event.changedTouches).forEach((touch) => {
+        if (-touch.identifier - 1 !== activeTouchId) return;
+
+        const point = getTouchDrawingPoint(touch);
+        if (point) addActiveDrawingPoint(point);
+      });
+
+      scheduleActiveDrawingPaint();
+    }
+
+    function handleNativeTouchEnd(event: TouchEvent) {
+      const activeTouchId = activeDrawingPointerIdRef.current;
+
+      if (activeTouchId === null || activeTouchId >= 0) return;
+
+      const endedTouch = Array.from(event.changedTouches).find(
+        (touch) => -touch.identifier - 1 === activeTouchId
+      );
+
+      if (!endedTouch) return;
+
+      event.preventDefault();
+      const finalPoint = getTouchDrawingPoint(endedTouch);
+      if (finalPoint) addActiveDrawingPoint(finalPoint);
+      finishActiveDrawing(activeTouchId);
+    }
+
     drawingLayer.addEventListener("pointerdown", handleNativePointerDown, {
+      passive: false,
+      capture: true,
+    });
+    drawingLayer.addEventListener("touchstart", handleNativeTouchStart, {
       passive: false,
       capture: true,
     });
@@ -1010,9 +1092,24 @@ export function NoteObjectLayer({
     window.addEventListener("pointercancel", handleNativePointerEnd, {
       capture: true,
     });
+    window.addEventListener("touchmove", handleNativeTouchMove, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("touchend", handleNativeTouchEnd, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("touchcancel", handleNativeTouchEnd, {
+      passive: false,
+      capture: true,
+    });
 
     return () => {
       drawingLayer.removeEventListener("pointerdown", handleNativePointerDown, {
+        capture: true,
+      });
+      drawingLayer.removeEventListener("touchstart", handleNativeTouchStart, {
         capture: true,
       });
       window.removeEventListener("pointermove", handleNativePointerMove, {
@@ -1025,6 +1122,15 @@ export function NoteObjectLayer({
         capture: true,
       });
       window.removeEventListener("pointercancel", handleNativePointerEnd, {
+        capture: true,
+      });
+      window.removeEventListener("touchmove", handleNativeTouchMove, {
+        capture: true,
+      });
+      window.removeEventListener("touchend", handleNativeTouchEnd, {
+        capture: true,
+      });
+      window.removeEventListener("touchcancel", handleNativeTouchEnd, {
         capture: true,
       });
     };
