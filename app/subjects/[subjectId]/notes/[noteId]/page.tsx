@@ -40,6 +40,9 @@ export default function NoteEditorPage() {
   const [objects, setObjects] = useState<NoteObject[]>([]);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
+  const [selectionTool, setSelectionTool] = useState<"rectangle" | "lasso">(
+    "rectangle"
+  );
   const [noteMode, setNoteMode] = useState<"text" | "draw">("text");
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [drawingTool, setDrawingTool] = useState<"draw" | "erase">("draw");
@@ -49,15 +52,18 @@ export default function NoteEditorPage() {
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showDrawMenu, setShowDrawMenu] = useState(false);
+  const [showSelectMenu, setShowSelectMenu] = useState(false);
   const [showPagePanel, setShowPagePanel] = useState(false);
   const [showNoteMenu, setShowNoteMenu] = useState(false);
   const [textContentHeight, setTextContentHeight] = useState(0);
   const [saveRequestId, setSaveRequestId] = useState(0);
   const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
+  const [drawingRedoRequestId, setDrawingRedoRequestId] = useState(0);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
   const pendingDrawingCountRef = useRef(0);
+  const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
   const undoStackRef = useRef<
     Array<{
       content: string;
@@ -120,7 +126,7 @@ export default function NoteEditorPage() {
   }, [showAddMenu, showStickerPicker]);
 
   function toggleExpandedNoteBox(
-    target: "note" | "pages" | "add" | "draw"
+    target: "note" | "pages" | "add" | "draw" | "select"
   ) {
     const isTargetOpen =
       target === "note"
@@ -129,13 +135,16 @@ export default function NoteEditorPage() {
           ? showPagePanel
           : target === "add"
             ? showAddMenu
-            : showDrawMenu;
+            : target === "draw"
+              ? showDrawMenu
+              : showSelectMenu;
     const shouldOpenTarget = !isTargetOpen;
 
     setShowNoteMenu(shouldOpenTarget && target === "note");
     setShowPagePanel(shouldOpenTarget && target === "pages");
     setShowAddMenu(shouldOpenTarget && target === "add");
     setShowDrawMenu(shouldOpenTarget && target === "draw");
+    setShowSelectMenu(shouldOpenTarget && target === "select");
 
     if (!(shouldOpenTarget && target === "add")) {
       setShowStickerPicker(false);
@@ -216,34 +225,6 @@ export default function NoteEditorPage() {
     setSelectedObjectIds([]);
   }
 
-  useEffect(() => {
-    function handleUndoShortcut(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const isEditableTarget =
-        target?.isContentEditable ||
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT";
-
-      if (!event.ctrlKey || event.key.toLowerCase() !== "z" || isEditableTarget) {
-        return;
-      }
-
-      event.preventDefault();
-
-      if (pendingDrawingCountRef.current > 0) {
-        setDrawingUndoRequestId((current) => current + 1);
-        return;
-      }
-
-      applyUndoSnapshot();
-    }
-
-    window.addEventListener("keydown", handleUndoShortcut);
-
-    return () => window.removeEventListener("keydown", handleUndoShortcut);
-  });
-
   function handleSaveNote() {
     setSaveRequestId((current) => current + 1);
 
@@ -263,6 +244,7 @@ export default function NoteEditorPage() {
     setShowPagePanel(false);
     setShowAddMenu(false);
     setShowDrawMenu(false);
+    setShowSelectMenu(false);
     setShowStickerPicker(false);
     setIsObjectSelectionMode(false);
     setIsDrawingMode(false);
@@ -301,6 +283,85 @@ export default function NoteEditorPage() {
 
     setData(updatedData);
   }
+
+  function undoLatestSavedDrawingStroke() {
+    let latestDrawingIndex = -1;
+    for (let index = objects.length - 1; index >= 0; index -= 1) {
+      if (objects[index].type === "drawing") {
+        latestDrawingIndex = index;
+        break;
+      }
+    }
+
+    if (latestDrawingIndex === -1) return false;
+
+    const latestDrawing = objects[latestDrawingIndex];
+    drawingObjectRedoStackRef.current = [
+      ...drawingObjectRedoStackRef.current.slice(-49),
+      latestDrawing,
+    ];
+
+    handleChangeObjects(
+      objects.filter((object) => object.id !== latestDrawing.id)
+    );
+    return true;
+  }
+
+  function redoLatestSavedDrawingStroke() {
+    const drawingToRestore = drawingObjectRedoStackRef.current.pop();
+    if (!drawingToRestore) return false;
+
+    handleChangeObjects([...objects, drawingToRestore]);
+    return true;
+  }
+
+  useEffect(() => {
+    function handleUndoShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        target?.isContentEditable ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT";
+
+      const isUndoShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "z";
+      const isRedoShortcut =
+        ((event.ctrlKey || event.metaKey) &&
+          event.shiftKey &&
+          event.key.toLowerCase() === "z") ||
+        ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y");
+
+      if ((!isUndoShortcut && !isRedoShortcut) || isEditableTarget) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (isRedoShortcut) {
+        setDrawingRedoRequestId((current) => current + 1);
+        if (redoLatestSavedDrawingStroke()) return;
+        return;
+      }
+
+      if (pendingDrawingCountRef.current > 0) {
+        setDrawingUndoRequestId((current) => current + 1);
+        return;
+      }
+
+      if (undoLatestSavedDrawingStroke()) {
+        return;
+      }
+
+      applyUndoSnapshot();
+    }
+
+    window.addEventListener("keydown", handleUndoShortcut);
+
+    return () => window.removeEventListener("keydown", handleUndoShortcut);
+  });
 
   function handlePendingDrawingCountChange(count: number) {
     pendingDrawingCountRef.current = count;
@@ -452,6 +513,7 @@ export default function NoteEditorPage() {
     setShowPagePanel(false);
     setShowAddMenu(false);
     setShowDrawMenu(false);
+    setShowSelectMenu(false);
     setShowStickerPicker(false);
     setIsObjectSelectionMode(false);
     setIsDrawingMode(false);
@@ -1357,7 +1419,7 @@ function addTextBox() {
                 setShowDrawMenu(false);
               }}
             >
-              Text
+              Pan
             </button>
 
             <button
@@ -1433,21 +1495,75 @@ function addTextBox() {
         )}
       </div>
 
-      <button
-        type="button"
-        className={
-          isObjectSelectionMode
-            ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-            : noteToolbarButtonClass
-        }
-        onClick={() => {
-          setIsObjectSelectionMode((current) => !current);
-          setIsDrawingMode(false);
-          setSelectedObjectIds([]);
-        }}
-      >
-        Select Box
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          className={
+            isObjectSelectionMode
+              ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+              : noteToolbarButtonClass
+          }
+          onClick={() => toggleExpandedNoteBox("select")}
+        >
+          {isObjectSelectionMode
+            ? selectionTool === "lasso"
+              ? "Draw Select"
+              : "Rectangle Select"
+            : "Select Box"}
+        </button>
+
+        {showSelectMenu && (
+          <div className={noteToolbarMenuClass}>
+            <button
+              type="button"
+              className={
+                isObjectSelectionMode && selectionTool === "rectangle"
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
+              onClick={() => {
+                setSelectionTool("rectangle");
+                setIsObjectSelectionMode(true);
+                setIsDrawingMode(false);
+                setSelectedObjectIds([]);
+                setShowSelectMenu(false);
+              }}
+            >
+              Rectangle Select
+            </button>
+            <button
+              type="button"
+              className={
+                isObjectSelectionMode && selectionTool === "lasso"
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
+              onClick={() => {
+                setSelectionTool("lasso");
+                setIsObjectSelectionMode(true);
+                setIsDrawingMode(false);
+                setSelectedObjectIds([]);
+                setShowSelectMenu(false);
+              }}
+            >
+              Draw Select
+            </button>
+            {isObjectSelectionMode && (
+              <button
+                type="button"
+                className={noteToolbarMenuItemClass}
+                onClick={() => {
+                  setIsObjectSelectionMode(false);
+                  setSelectedObjectIds([]);
+                  setShowSelectMenu(false);
+                }}
+              >
+                Done Selecting
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 
@@ -1850,21 +1966,75 @@ function addTextBox() {
                 )}
               </div>
 
-              <button
-                type="button"
-                className={
-                  isObjectSelectionMode
-                    ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
-                    : "rounded-lg border px-3 py-1 text-sm"
-                }
-                onClick={() => {
-                  setIsObjectSelectionMode((current) => !current);
-                  setIsDrawingMode(false);
-                  setSelectedObjectIds([]);
-                }}
-              >
-                {isObjectSelectionMode ? "Done Selecting" : "Select Objects"}
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  className={
+                    isObjectSelectionMode
+                      ? "rounded-lg bg-blue-600 px-3 py-1 text-sm text-white"
+                      : "rounded-lg border px-3 py-1 text-sm"
+                  }
+                  onClick={() => toggleExpandedNoteBox("select")}
+                >
+                  {isObjectSelectionMode
+                    ? selectionTool === "lasso"
+                      ? "Draw Select"
+                      : "Rectangle Select"
+                    : "Select Objects"}
+                </button>
+
+                {showSelectMenu && (
+                  <div className="absolute left-0 top-9 z-[10001] w-52 rounded-xl border bg-white p-2 shadow-lg">
+                    <button
+                      type="button"
+                      className={
+                        isObjectSelectionMode && selectionTool === "rectangle"
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setSelectionTool("rectangle");
+                        setIsObjectSelectionMode(true);
+                        setIsDrawingMode(false);
+                        setSelectedObjectIds([]);
+                        setShowSelectMenu(false);
+                      }}
+                    >
+                      Rectangle Select
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        isObjectSelectionMode && selectionTool === "lasso"
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setSelectionTool("lasso");
+                        setIsObjectSelectionMode(true);
+                        setIsDrawingMode(false);
+                        setSelectedObjectIds([]);
+                        setShowSelectMenu(false);
+                      }}
+                    >
+                      Draw Select
+                    </button>
+                    {isObjectSelectionMode && (
+                      <button
+                        type="button"
+                        className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        onClick={() => {
+                          setIsObjectSelectionMode(false);
+                          setSelectedObjectIds([]);
+                          setShowSelectMenu(false);
+                        }}
+                      >
+                        Done Selecting
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="relative">
                 <button
@@ -1900,7 +2070,7 @@ function addTextBox() {
                         setShowDrawMenu(false);
                       }}
                     >
-                      Text
+                      Pan
                     </button>
 
                     <button
@@ -2159,6 +2329,7 @@ function addTextBox() {
             onSelectionChange={setSelectedObjectIds}
             onChangeObjects={handleChangeObjects}
             selectionMode={isObjectSelectionMode}
+            selectionTool={selectionTool}
             drawingMode={isDrawingMode}
             drawingTool={drawingTool}
             drawingColor={shapeColor}
@@ -2168,6 +2339,7 @@ function addTextBox() {
             theme={data.settings.theme}
             saveRequestId={saveRequestId}
             undoRequestId={drawingUndoRequestId}
+            redoRequestId={drawingRedoRequestId}
             onPendingDrawingCountChange={handlePendingDrawingCountChange}
             pageWidth={pageWidth}
             pageHeight={pageHeight}

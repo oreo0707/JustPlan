@@ -11,6 +11,7 @@ type NoteObjectLayerProps = {
   onSelectionChange: (ids: string[]) => void;
   onChangeObjects: (objects: NoteObject[]) => void;
   selectionMode: boolean;
+  selectionTool?: "rectangle" | "lasso";
   drawingMode: boolean;
   drawingTool: "draw" | "erase";
   drawingColor: string;
@@ -18,6 +19,7 @@ type NoteObjectLayerProps = {
   theme?: "light" | "dark";
   saveRequestId?: number;
   undoRequestId?: number;
+  redoRequestId?: number;
   onPendingDrawingCountChange?: (count: number) => void;
   pageWidth?: number;
   pageHeight?: number;
@@ -223,6 +225,60 @@ function boxesIntersect(a: SelectionBox, b: SelectionBox) {
   );
 }
 
+function isPointInBox(point: DrawingPoint, box: SelectionBox) {
+  return (
+    point.x >= box.left &&
+    point.x <= box.left + box.width &&
+    point.y >= box.top &&
+    point.y <= box.top + box.height
+  );
+}
+
+function isPointInPolygon(point: DrawingPoint, polygon: DrawingPoint[]) {
+  if (polygon.length < 3) return false;
+
+  let inside = false;
+
+  for (
+    let index = 0, previousIndex = polygon.length - 1;
+    index < polygon.length;
+    previousIndex = index, index += 1
+  ) {
+    const current = polygon[index];
+    const previous = polygon[previousIndex];
+    const crossesY =
+      current.y > point.y !== previous.y > point.y;
+
+    if (!crossesY) continue;
+
+    const intersectionX =
+      ((previous.x - current.x) * (point.y - current.y)) /
+        (previous.y - current.y) +
+      current.x;
+
+    if (point.x < intersectionX) inside = !inside;
+  }
+
+  return inside;
+}
+
+function doesPolygonSelectBox(polygon: DrawingPoint[], box: SelectionBox) {
+  if (polygon.length < 3) return false;
+
+  const boxPoints = [
+    { x: box.left, y: box.top },
+    { x: box.left + box.width, y: box.top },
+    { x: box.left, y: box.top + box.height },
+    { x: box.left + box.width, y: box.top + box.height },
+    { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+  ];
+
+  return (
+    boxPoints.some((point) => isPointInPolygon(point, polygon)) ||
+    polygon.some((point) => isPointInBox(point, box))
+  );
+}
+
 function isVertexShape(object: NoteObject) {
   return (
     object.type === "rectangle" ||
@@ -300,6 +356,7 @@ export function NoteObjectLayer({
   onSelectionChange,
   onChangeObjects,
   selectionMode,
+  selectionTool = "rectangle",
   drawingMode,
   drawingTool,
   drawingColor,
@@ -307,6 +364,7 @@ export function NoteObjectLayer({
   theme = "light",
   saveRequestId = 0,
   undoRequestId = 0,
+  redoRequestId = 0,
   onPendingDrawingCountChange,
   pageWidth = 794,
   pageHeight = 1123,
@@ -317,9 +375,18 @@ export function NoteObjectLayer({
   const liveDrawingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastHandledSaveRequestIdRef = useRef(0);
   const lastHandledUndoRequestIdRef = useRef(0);
+  const lastHandledRedoRequestIdRef = useRef(0);
   const activeDrawingPointsRef = useRef<DrawingPoint[]>([]);
   const activeDrawingFrameRef = useRef<number | null>(null);
   const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
+  const pendingDrawingRedoStackRef = useRef<NoteObject[][]>([]);
+  const tabletGestureRef = useRef<{
+    touchCount: 2 | 3;
+    startTime: number;
+    startX: number;
+    startY: number;
+    maxDistance: number;
+  } | null>(null);
   const activeDrawingPointerIdRef = useRef<number | null>(null);
   const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
   const activeDrawingMinDistanceRef = useRef(1);
@@ -331,6 +398,7 @@ export function NoteObjectLayer({
   const drawingColorRef = useRef(drawingColor);
   const drawingStrokeWidthRef = useRef(drawingStrokeWidth);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [selectionPath, setSelectionPath] = useState<DrawingPoint[]>([]);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
@@ -390,6 +458,14 @@ export function NoteObjectLayer({
     };
   }
 
+  function isStylusTouch(touch: Touch) {
+    return (touch as Touch & { touchType?: string }).touchType === "stylus";
+  }
+
+  function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
+    return event.pointerType !== "touch";
+  }
+
   function isPointInsidePaper(point: DrawingPoint) {
     return (
       point.x >= 0 &&
@@ -443,6 +519,26 @@ export function NoteObjectLayer({
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
 
+  function undoPendingDrawingStroke() {
+    setPendingDrawings((current) => {
+      if (current.length === 0) return current;
+
+      pendingDrawingRedoStackRef.current = [
+        ...pendingDrawingRedoStackRef.current.slice(-49),
+        current,
+      ];
+
+      return current.slice(0, -1);
+    });
+  }
+
+  function redoPendingDrawingStroke() {
+    const nextPendingDrawings = pendingDrawingRedoStackRef.current.pop();
+    if (!nextPendingDrawings) return;
+
+    setPendingDrawings(nextPendingDrawings);
+  }
+
   function commitDrawingPoints(finalPoints: DrawingPoint[]) {
     if (finalPoints.length < 2) {
       clearLiveDrawingCanvas();
@@ -476,6 +572,7 @@ export function NoteObjectLayer({
     };
 
     pushPendingDrawingUndoSnapshot();
+    pendingDrawingRedoStackRef.current = [];
     setPendingDrawings((current) => [...current, newDrawing]);
     onSelectionChange([]);
     clearLiveDrawingCanvas();
@@ -574,6 +671,7 @@ export function NoteObjectLayer({
 
     function handlePointerDown(event: PointerEvent) {
       if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+      if (!canUsePointerForDrawing(event)) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -614,6 +712,7 @@ export function NoteObjectLayer({
 
       const touch = event.changedTouches[0];
       if (!touch) return;
+      if (!isStylusTouch(touch)) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -712,6 +811,7 @@ export function NoteObjectLayer({
     window.setTimeout(() => {
       setPendingDrawings([]);
       pendingDrawingUndoStackRef.current = [];
+      pendingDrawingRedoStackRef.current = [];
     }, 0);
   }, [objects, onChangeObjects, pendingDrawings, saveRequestId]);
 
@@ -729,17 +829,20 @@ export function NoteObjectLayer({
 
     lastHandledUndoRequestIdRef.current = undoRequestId;
 
-    window.setTimeout(() => {
-      const previousPendingDrawings = pendingDrawingUndoStackRef.current.pop();
-
-      if (previousPendingDrawings) {
-        setPendingDrawings(previousPendingDrawings);
-        return;
-      }
-
-      setPendingDrawings((current) => current.slice(0, -1));
-    }, 0);
+    window.setTimeout(undoPendingDrawingStroke, 0);
   }, [undoRequestId]);
+
+  useEffect(() => {
+    if (
+      redoRequestId === 0 ||
+      lastHandledRedoRequestIdRef.current === redoRequestId
+    ) {
+      return;
+    }
+
+    lastHandledRedoRequestIdRef.current = redoRequestId;
+    window.setTimeout(redoPendingDrawingStroke, 0);
+  }, [redoRequestId]);
 
   function pushPendingDrawingUndoSnapshot(nextSnapshot = pendingDrawings) {
     const latestSnapshot = pendingDrawingUndoStackRef.current.at(-1);
@@ -1455,6 +1558,8 @@ export function NoteObjectLayer({
   }
 
   function startErasing(event: React.PointerEvent<HTMLDivElement>) {
+    if (!canUsePointerForDrawing(event)) return;
+
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1504,6 +1609,7 @@ export function NoteObjectLayer({
         if (!pendingUndoSnapshotCaptured) {
           pushPendingDrawingUndoSnapshot(workingPendingDrawings);
           pendingUndoSnapshotCaptured = true;
+          pendingDrawingRedoStackRef.current = [];
         }
 
         workingPendingDrawings = nextPendingDrawings;
@@ -1649,6 +1755,7 @@ export function NoteObjectLayer({
 
   function startDrawing(event: PointerEvent) {
     if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
+    if (!canUsePointerForDrawing(event)) return;
     if (Date.now() < suppressPointerDrawingUntilRef.current) return;
 
     event.preventDefault();
@@ -1670,6 +1777,74 @@ export function NoteObjectLayer({
   useEffect(() => {
     const drawingLayer = layerRef.current;
     if (!drawingLayer) return;
+
+    function getTouchCentroid(touches: TouchList) {
+      const touchItems = Array.from(touches);
+      const total = touchItems.reduce(
+        (sum, touch) => ({
+          x: sum.x + touch.clientX,
+          y: sum.y + touch.clientY,
+        }),
+        { x: 0, y: 0 }
+      );
+
+      return {
+        x: total.x / Math.max(1, touchItems.length),
+        y: total.y / Math.max(1, touchItems.length),
+      };
+    }
+
+    function handleGestureTouchStart(event: TouchEvent) {
+      if (!drawingModeRef.current) return;
+      if (event.touches.length !== 2 && event.touches.length !== 3) return;
+
+      const center = getTouchCentroid(event.touches);
+      tabletGestureRef.current = {
+        touchCount: event.touches.length,
+        startTime: Date.now(),
+        startX: center.x,
+        startY: center.y,
+        maxDistance: 0,
+      };
+    }
+
+    function handleGestureTouchMove(event: TouchEvent) {
+      const gesture = tabletGestureRef.current;
+      if (!gesture) return;
+
+      event.preventDefault();
+
+      if (event.touches.length !== gesture.touchCount) {
+        tabletGestureRef.current = null;
+        return;
+      }
+
+      const center = getTouchCentroid(event.touches);
+      gesture.maxDistance = Math.max(
+        gesture.maxDistance,
+        Math.hypot(center.x - gesture.startX, center.y - gesture.startY)
+      );
+    }
+
+    function handleGestureTouchEnd(event: TouchEvent) {
+      const gesture = tabletGestureRef.current;
+      if (!gesture) return;
+
+      if (event.touches.length > 0) return;
+
+      event.preventDefault();
+      tabletGestureRef.current = null;
+
+      const duration = Date.now() - gesture.startTime;
+      if (duration > 420 || gesture.maxDistance > 28) return;
+
+      if (gesture.touchCount === 2) {
+        undoPendingDrawingStroke();
+        return;
+      }
+
+      redoPendingDrawingStroke();
+    }
 
     function handleNativePointerDown(event: PointerEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
@@ -1722,6 +1897,7 @@ export function NoteObjectLayer({
 
       const touch = event.changedTouches[0];
       if (!touch) return;
+      if (!isStylusTouch(touch)) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -1781,6 +1957,10 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
+    drawingLayer.addEventListener("touchstart", handleGestureTouchStart, {
+      passive: false,
+      capture: true,
+    });
     drawingLayer.addEventListener("touchstart", handleNativeTouchStart, {
       passive: false,
       capture: true,
@@ -1803,7 +1983,15 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
+    window.addEventListener("touchmove", handleGestureTouchMove, {
+      passive: false,
+      capture: true,
+    });
     window.addEventListener("touchend", handleNativeTouchEnd, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("touchend", handleGestureTouchEnd, {
       passive: false,
       capture: true,
     });
@@ -1811,9 +1999,16 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
+    window.addEventListener("touchcancel", handleGestureTouchEnd, {
+      passive: false,
+      capture: true,
+    });
 
     return () => {
       drawingLayer.removeEventListener("pointerdown", handleNativePointerDown, {
+        capture: true,
+      });
+      drawingLayer.removeEventListener("touchstart", handleGestureTouchStart, {
         capture: true,
       });
       drawingLayer.removeEventListener("touchstart", handleNativeTouchStart, {
@@ -1834,10 +2029,19 @@ export function NoteObjectLayer({
       window.removeEventListener("touchmove", handleNativeTouchMove, {
         capture: true,
       });
+      window.removeEventListener("touchmove", handleGestureTouchMove, {
+        capture: true,
+      });
       window.removeEventListener("touchend", handleNativeTouchEnd, {
         capture: true,
       });
+      window.removeEventListener("touchend", handleGestureTouchEnd, {
+        capture: true,
+      });
       window.removeEventListener("touchcancel", handleNativeTouchEnd, {
+        capture: true,
+      });
+      window.removeEventListener("touchcancel", handleGestureTouchEnd, {
         capture: true,
       });
     };
@@ -1918,11 +2122,57 @@ export function NoteObjectLayer({
 
     const layerLeft = layerBounds.left;
     const layerTop = layerBounds.top;
-    const startX = event.clientX - layerLeft;
-    const startY = event.clientY - layerTop;
+    const startX = clampValue(event.clientX - layerLeft, 0, pageWidth);
+    const startY = clampValue(event.clientY - layerTop, 0, drawingHeight);
     onSelectionChange([]);
+    setSelectionPath([]);
+
+    if (selectionTool === "lasso") {
+      const firstPoint = { x: startX, y: startY };
+      let pathPoints = [firstPoint];
+      setSelectionPath(pathPoints);
+
+      function handleLassoMove(moveEvent: PointerEvent) {
+        moveEvent.preventDefault();
+
+        const nextPoint = {
+          x: clampValue(moveEvent.clientX - layerLeft, 0, pageWidth),
+          y: clampValue(moveEvent.clientY - layerTop, 0, drawingHeight),
+        };
+        const lastPoint = pathPoints[pathPoints.length - 1];
+
+        if (Math.hypot(nextPoint.x - lastPoint.x, nextPoint.y - lastPoint.y) < 4) {
+          return;
+        }
+
+        pathPoints = [...pathPoints, nextPoint];
+        setSelectionPath(pathPoints);
+
+        if (pathPoints.length >= 3) {
+          onSelectionChange(
+            objects
+              .filter((object) =>
+                doesPolygonSelectBox(pathPoints, getObjectBounds(object))
+              )
+              .map((object) => object.id)
+          );
+        }
+      }
+
+      function handleLassoUp() {
+        setSelectionPath([]);
+        window.removeEventListener("pointermove", handleLassoMove);
+        window.removeEventListener("pointerup", handleLassoUp);
+      }
+
+      window.addEventListener("pointermove", handleLassoMove);
+      window.addEventListener("pointerup", handleLassoUp);
+      return;
+    }
 
     function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
       const currentX = clampValue(moveEvent.clientX - layerLeft, 0, pageWidth);
       const currentY = clampValue(
         moveEvent.clientY - layerTop,
@@ -1977,7 +2227,7 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: drawingMode || selectionMode ? "none" : "auto",
+        touchAction: drawingMode ? "pan-y" : selectionMode ? "none" : "auto",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
@@ -2001,7 +2251,7 @@ export function NoteObjectLayer({
           style={{
             width: pageWidth,
             height: drawingHeight,
-            touchAction: "none",
+            touchAction: "pan-y",
             WebkitUserSelect: "none",
             userSelect: "none",
             WebkitTouchCallout: "none",
@@ -2676,6 +2926,19 @@ export function NoteObjectLayer({
           className="pointer-events-none absolute border-2 border-blue-600 bg-blue-500/15"
           style={selectionBox}
         />
+      )}
+
+      {selectionPath.length > 1 && (
+        <svg className="pointer-events-none absolute inset-0 z-[90] h-full w-full overflow-visible">
+          <path
+            d={`${getDrawingPath(selectionPath)} Z`}
+            fill="rgba(59, 130, 246, 0.12)"
+            stroke="#2563eb"
+            strokeWidth="2"
+            strokeDasharray="6 4"
+            strokeLinejoin="round"
+          />
+        </svg>
       )}
     </div>
   );
