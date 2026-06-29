@@ -2313,17 +2313,11 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction:
-          drawingMode && drawingTool === "erase"
-            ? "none"
-            : "pan-y",
+        touchAction: "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior:
-          drawingMode && drawingTool === "erase"
-            ? "none"
-            : "auto",
+        overscrollBehavior: "auto",
       }}
       onPointerDown={(event) => {
         if (drawingMode) {
