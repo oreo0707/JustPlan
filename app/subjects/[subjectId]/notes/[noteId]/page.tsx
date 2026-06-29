@@ -1419,7 +1419,7 @@ function addTextBox() {
                 setShowDrawMenu(false);
               }}
             >
-              Pan
+              Text
             </button>
 
             <button

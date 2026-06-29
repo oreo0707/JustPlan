@@ -2252,7 +2252,7 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: drawingMode ? "pan-y" : selectionMode ? "none" : "auto",
+        touchAction: drawingMode || selectionMode ? "none" : "auto",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
