@@ -330,6 +330,69 @@ export default function SettingsPage() {
             </label>
 
             <label className="text-sm font-medium text-gray-700">
+              Default pencil thickness
+              <select
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"
+                value={data.settings.default_pencil_thickness}
+                onChange={(event) =>
+                  handleUpdateSettings({
+                    default_pencil_thickness: Number(event.target.value),
+                  })
+                }
+              >
+                {[2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 28, 32].map(
+                  (size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label className="text-sm font-medium text-gray-700">
+              Default eraser thickness
+              <select
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"
+                value={data.settings.default_eraser_thickness}
+                onChange={(event) =>
+                  handleUpdateSettings({
+                    default_eraser_thickness: Number(event.target.value),
+                  })
+                }
+              >
+                {[4, 6, 8, 10, 12, 16, 18, 20, 24, 28, 32, 40, 48].map(
+                  (size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label className="text-sm font-medium text-gray-700">
+              Default highlighter thickness
+              <select
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"
+                value={data.settings.default_highlighter_thickness}
+                onChange={(event) =>
+                  handleUpdateSettings({
+                    default_highlighter_thickness: Number(event.target.value),
+                  })
+                }
+              >
+                {[4, 6, 8, 10, 12, 16, 18, 20, 24, 28, 32, 40, 48].map(
+                  (size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label className="text-sm font-medium text-gray-700">
               Default note template
               <select
                 className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"

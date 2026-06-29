@@ -13,7 +13,7 @@ type NoteObjectLayerProps = {
   selectionMode: boolean;
   selectionTool?: "rectangle" | "lasso";
   drawingMode: boolean;
-  drawingTool: "draw" | "erase";
+  drawingTool: "draw" | "erase" | "highlight";
   drawingColor: string;
   drawingStrokeWidth: number;
   theme?: "light" | "dark";
@@ -506,8 +506,17 @@ export function NoteObjectLayer({
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     context.lineCap = "round";
     context.lineJoin = "round";
-    context.strokeStyle = drawingColorRef.current;
-    context.lineWidth = drawingStrokeWidthRef.current;
+    if (drawingToolRef.current === "highlight") {
+      context.strokeStyle = drawingColorRef.current;
+      context.globalAlpha = 0.45;
+      context.lineWidth = drawingStrokeWidthRef.current;
+      context.globalCompositeOperation = "multiply";
+    } else {
+      context.strokeStyle = drawingColorRef.current;
+      context.globalAlpha = 1;
+      context.lineWidth = drawingStrokeWidthRef.current;
+      context.globalCompositeOperation = "source-over";
+    }
 
     return context;
   }
@@ -582,6 +591,8 @@ export function NoteObjectLayer({
         y: point.y - top,
       })),
       color: drawingColorRef.current,
+      drawingTool:
+        drawingToolRef.current === "highlight" ? "highlight" : "draw",
       strokeWidth,
       flipX: false,
       flipY: false,
@@ -664,7 +675,13 @@ export function NoteObjectLayer({
     }
 
     function beginCanvasStroke(id: number, point: DrawingPoint) {
-      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+      if (
+        !drawingModeRef.current ||
+        (drawingToolRef.current !== "draw" &&
+          drawingToolRef.current !== "highlight")
+      ) {
+        return;
+      }
 
       if (activeDrawingPointerIdRef.current !== null) {
         commitDrawingPoints([...activeDrawingPointsRef.current]);
@@ -702,7 +719,13 @@ export function NoteObjectLayer({
       event.preventDefault();
       activeCanvas.setPointerCapture(event.pointerId);
 
-      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+      if (
+        !drawingModeRef.current ||
+        (drawingToolRef.current !== "draw" &&
+          drawingToolRef.current !== "highlight")
+      ) {
+        return;
+      }
       if (!canUsePointerForDrawing(event)) return;
 
       event.preventDefault();
@@ -758,7 +781,13 @@ export function NoteObjectLayer({
     }
 
     function handleTouchStart(event: TouchEvent) {
-      if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
+      if (
+        !drawingModeRef.current ||
+        (drawingToolRef.current !== "draw" &&
+          drawingToolRef.current !== "highlight")
+      ) {
+        return;
+      }
 
       const touch = event.changedTouches[0];
       if (!touch) return;
@@ -1774,6 +1803,8 @@ export function NoteObjectLayer({
         y: point.y - top,
       })),
       color: drawingColorRef.current,
+      drawingTool:
+        drawingToolRef.current === "highlight" ? "highlight" : "draw",
       strokeWidth,
       flipX: false,
       flipY: false,
@@ -2274,7 +2305,7 @@ export function NoteObjectLayer({
       ref={layerRef}
       className={
         selectionMode || drawingMode
-          ? `pointer-events-auto absolute inset-0 z-20 touch-none select-none ${
+          ? `pointer-events-auto absolute inset-0 z-20 select-none ${
               drawingMode && drawingTool === "erase"
                 ? "cursor-cell"
                 : "cursor-crosshair"
@@ -2282,11 +2313,17 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: "pan-y",
+        touchAction:
+          drawingMode && drawingTool === "erase"
+            ? "none"
+            : "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior: "auto",
+        overscrollBehavior:
+          drawingMode && drawingTool === "erase"
+            ? "none"
+            : "auto",
       }}
       onPointerDown={(event) => {
         if (drawingMode) {
@@ -2304,7 +2341,7 @@ export function NoteObjectLayer({
         startSelectionBox(event);
       }}
     >
-      {drawingMode && drawingTool === "draw" && (
+      {drawingMode && (drawingTool === "draw" || drawingTool === "highlight") && (
         <canvas
           ref={liveDrawingCanvasRef}
           className="absolute inset-0 z-30 h-full w-full"
@@ -2337,9 +2374,13 @@ export function NoteObjectLayer({
             d={getDrawingPath(activeDrawingPoints)}
             fill="none"
             stroke={drawingColor}
+            strokeOpacity={drawingTool === "highlight" ? 0.45 : 1}
             strokeWidth={drawingStrokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
+            style={{
+              mixBlendMode: drawingTool === "highlight" ? "multiply" : "normal",
+            }}
           />
         </svg>
       )}
@@ -2366,10 +2407,15 @@ export function NoteObjectLayer({
               d={getDrawingPath(object.points ?? [])}
               fill="none"
               stroke={object.color ?? "#111827"}
+              strokeOpacity={object.drawingTool === "highlight" ? 0.45 : 1}
               strokeWidth={object.strokeWidth ?? 4}
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
+              style={{
+                mixBlendMode:
+                  object.drawingTool === "highlight" ? "multiply" : "normal",
+              }}
             />
           </svg>
         </div>
@@ -2797,10 +2843,15 @@ export function NoteObjectLayer({
                   d={getDrawingPath(object.points ?? [])}
                   fill="none"
                   stroke={object.color ?? "#111827"}
+                  strokeOpacity={object.drawingTool === "highlight" ? 0.45 : 1}
                   strokeWidth={object.strokeWidth ?? 4}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
+                  style={{
+                    mixBlendMode:
+                      object.drawingTool === "highlight" ? "multiply" : "normal",
+                  }}
                 />
               </svg>
             )}

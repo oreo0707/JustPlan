@@ -66,6 +66,7 @@ export type NoteObject = {
   vertices?: ShapeVertex[];
   points?: DrawingPoint[];
   strokeWidth?: number;
+  drawingTool?: "draw" | "highlight";
 
   color?: string;
   filled?: boolean;
@@ -106,6 +107,9 @@ export type Settings = {
   cursor_style: "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star" ;
   default_font_size: number;
   default_font_family: string;
+  default_pencil_thickness: number;
+  default_eraser_thickness: number;
+  default_highlighter_thickness: number;
   default_note_template: NoteTemplate;
   app_background_color: string;
   app_surface_color: string;

@@ -45,10 +45,19 @@ export default function NoteEditorPage() {
   );
   const [noteMode, setNoteMode] = useState<"text" | "draw">("text");
   const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const [drawingTool, setDrawingTool] = useState<"draw" | "erase">("draw");
+  const [drawingTool, setDrawingTool] = useState<"draw" | "erase" | "highlight">(
+    "draw"
+  );
   const [shapeColor, setShapeColor] = useState("#111827");
-  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(4);
-  const [eraserStrokeWidth, setEraserStrokeWidth] = useState(18);
+  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(
+    defaultData.settings.default_pencil_thickness
+  );
+  const [eraserStrokeWidth, setEraserStrokeWidth] = useState(
+    defaultData.settings.default_eraser_thickness
+  );
+  const [highlighterStrokeWidth, setHighlighterStrokeWidth] = useState(
+    defaultData.settings.default_highlighter_thickness
+  );
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showDrawMenu, setShowDrawMenu] = useState(false);
@@ -97,6 +106,11 @@ export default function NoteEditorPage() {
       setTemplate(foundNote?.template ?? "plain");
       setObjects(foundNote?.objects ?? []);
       setCursorStyle(loadedData.settings.cursor_style);
+      setDrawingStrokeWidth(loadedData.settings.default_pencil_thickness);
+      setEraserStrokeWidth(loadedData.settings.default_eraser_thickness);
+      setHighlighterStrokeWidth(
+        loadedData.settings.default_highlighter_thickness
+      );
       setHasLoaded(true);
     });
 
@@ -1258,6 +1272,20 @@ function addTextBox() {
   const noteSidePageButtonClass = isDarkNoteTheme
     ? "w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-left text-sm text-slate-100 hover:bg-slate-700"
     : "w-full rounded-lg border bg-gray-50 p-2 text-left text-sm hover:bg-gray-100";
+  const activeDrawingThickness =
+    drawingTool === "erase"
+      ? eraserStrokeWidth
+      : drawingTool === "highlight"
+        ? highlighterStrokeWidth
+        : drawingStrokeWidth;
+  const activeDrawingToolLabel =
+    drawingTool === "erase"
+      ? "Eraser"
+      : drawingTool === "highlight"
+        ? "Highlighter"
+        : "Pencil";
+  const activeDrawingMaxThickness =
+    drawingTool === "erase" || drawingTool === "highlight" ? 48 : 32;
 
   const noteObjectToolbarControls = (
     <>
@@ -1396,9 +1424,7 @@ function addTextBox() {
           onClick={() => toggleExpandedNoteBox("draw")}
         >
           {isDrawingMode
-            ? drawingTool === "erase"
-              ? `Eraser ${eraserStrokeWidth}px`
-              : `Pencil ${drawingStrokeWidth}px`
+            ? `${activeDrawingToolLabel} ${activeDrawingThickness}px`
             : "Draw"}
         </button>
 
@@ -1458,6 +1484,24 @@ function addTextBox() {
               Eraser
             </button>
 
+            <button
+              type="button"
+              className={
+                drawingTool === "highlight" && isDrawingMode
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
+              onClick={() => {
+                setIsDrawingMode(true);
+                setDrawingTool("highlight");
+                setIsObjectSelectionMode(false);
+                setSelectedObjectIds([]);
+                setShowDrawMenu(false);
+              }}
+            >
+              Highlight
+            </button>
+
             <label
               className={
                 isDarkNoteTheme
@@ -1465,22 +1509,20 @@ function addTextBox() {
                   : "mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700"
               }
             >
-              {drawingTool === "erase" ? "Eraser" : "Pencil"} thickness:{" "}
-              {drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth}
-              px
+              {activeDrawingToolLabel} thickness: {activeDrawingThickness}px
               <input
                 type="range"
                 min="2"
-                max={drawingTool === "erase" ? "48" : "16"}
-                value={
-                  drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth
-                }
+                max={activeDrawingMaxThickness}
+                value={activeDrawingThickness}
                 className="mt-2 w-full"
                 onChange={(event) => {
                   const nextWidth = Number(event.target.value);
 
                   if (drawingTool === "erase") {
                     setEraserStrokeWidth(nextWidth);
+                  } else if (drawingTool === "highlight") {
+                    setHighlighterStrokeWidth(nextWidth);
                   } else {
                     setDrawingStrokeWidth(nextWidth);
                   }
@@ -2047,9 +2089,7 @@ function addTextBox() {
                   onClick={() => toggleExpandedNoteBox("draw")}
                 >
                   {isDrawingMode
-                    ? drawingTool === "erase"
-                      ? `Eraser ${eraserStrokeWidth}px`
-                      : `Pencil ${drawingStrokeWidth}px`
+                    ? `${activeDrawingToolLabel} ${activeDrawingThickness}px`
                     : "Draw"}
                 </button>
 
@@ -2109,27 +2149,39 @@ function addTextBox() {
                       Eraser
                     </button>
 
+                    <button
+                      type="button"
+                      className={
+                        drawingTool === "highlight" && isDrawingMode
+                          ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                          : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      }
+                      onClick={() => {
+                        setIsDrawingMode(true);
+                        setDrawingTool("highlight");
+                        setIsObjectSelectionMode(false);
+                        setSelectedObjectIds([]);
+                        setShowDrawMenu(false);
+                      }}
+                    >
+                      Highlight
+                    </button>
+
                     <label className="mt-2 block rounded-lg border bg-gray-50 p-3 text-xs text-gray-700">
-                      {drawingTool === "erase" ? "Eraser" : "Pencil"} thickness:{" "}
-                      {drawingTool === "erase"
-                        ? eraserStrokeWidth
-                        : drawingStrokeWidth}
-                      px
+                      {activeDrawingToolLabel} thickness: {activeDrawingThickness}px
                       <input
                         type="range"
                         min="2"
-                        max={drawingTool === "erase" ? "48" : "16"}
-                        value={
-                          drawingTool === "erase"
-                            ? eraserStrokeWidth
-                            : drawingStrokeWidth
-                        }
+                        max={activeDrawingMaxThickness}
+                        value={activeDrawingThickness}
                         className="mt-2 w-full"
                         onChange={(event) => {
                           const nextWidth = Number(event.target.value);
 
                           if (drawingTool === "erase") {
                             setEraserStrokeWidth(nextWidth);
+                          } else if (drawingTool === "highlight") {
+                            setHighlighterStrokeWidth(nextWidth);
                           } else {
                             setDrawingStrokeWidth(nextWidth);
                           }
@@ -2334,7 +2386,11 @@ function addTextBox() {
             drawingTool={drawingTool}
             drawingColor={shapeColor}
             drawingStrokeWidth={
-              drawingTool === "erase" ? eraserStrokeWidth : drawingStrokeWidth
+              drawingTool === "erase"
+                ? eraserStrokeWidth
+                : drawingTool === "highlight"
+                  ? highlighterStrokeWidth
+                  : drawingStrokeWidth
             }
             theme={data.settings.theme}
             saveRequestId={saveRequestId}
