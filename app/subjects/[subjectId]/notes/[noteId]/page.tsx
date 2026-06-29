@@ -40,6 +40,7 @@ export default function NoteEditorPage() {
   const [objects, setObjects] = useState<NoteObject[]>([]);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
+  const [noteMode, setNoteMode] = useState<"text" | "draw">("text");
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [drawingTool, setDrawingTool] = useState<"draw" | "erase">("draw");
   const [shapeColor, setShapeColor] = useState("#111827");
@@ -328,6 +329,7 @@ export default function NoteEditorPage() {
   }
 
   function switchToTextMode() {
+    setNoteMode("text");
     setIsDrawingMode(false);
     setDrawingTool("draw");
     setIsObjectSelectionMode(false);
@@ -336,6 +338,7 @@ export default function NoteEditorPage() {
   }
 
   function switchToDrawMode() {
+    setNoteMode("draw");
     setIsDrawingMode(true);
     setDrawingTool("draw");
     setIsObjectSelectionMode(false);
@@ -1341,8 +1344,13 @@ function addTextBox() {
           <div className={noteToolbarMenuClass}>
             <button
               type="button"
-              className={!isDrawingMode ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white" : noteToolbarMenuItemClass}
+              className={
+                !isDrawingMode
+                  ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                  : noteToolbarMenuItemClass
+              }
               onClick={() => {
+                setNoteMode("text");
                 setIsDrawingMode(false);
                 setIsObjectSelectionMode(false);
                 setSelectedObjectIds([]);
@@ -1591,7 +1599,7 @@ function addTextBox() {
                   <button
                     type="button"
                     className={
-                      !isDrawingMode
+                      noteMode === "text"
                         ? "rounded-lg bg-blue-600 px-2 py-1 text-xs text-white"
                         : isDarkNoteTheme
                           ? "rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-100 hover:bg-slate-800"
@@ -1605,7 +1613,7 @@ function addTextBox() {
                   <button
                     type="button"
                     className={
-                      isDrawingMode && drawingTool === "draw"
+                      noteMode === "draw"
                         ? "rounded-lg bg-blue-600 px-2 py-1 text-xs text-white"
                         : isDarkNoteTheme
                           ? "rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-100 hover:bg-slate-800"
@@ -1885,6 +1893,7 @@ function addTextBox() {
                           : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
                       }
                       onClick={() => {
+                        setNoteMode("text");
                         setIsDrawingMode(false);
                         setIsObjectSelectionMode(false);
                         setSelectedObjectIds([]);

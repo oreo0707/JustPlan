@@ -231,6 +231,16 @@ function isVertexShape(object: NoteObject) {
   );
 }
 
+function canDuplicateObject(object: NoteObject) {
+  return (
+    isVertexShape(object) ||
+    object.type === "line" ||
+    object.type === "image" ||
+    object.type === "sticker" ||
+    object.type === "textbox"
+  );
+}
+
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
   if (object.vertices?.length) return object.vertices;
 
@@ -324,26 +334,61 @@ export function NoteObjectLayer({
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
+  const [objectClipboard, setObjectClipboard] = useState<NoteObject[]>([]);
+  const [objectClipboardAnchor, setObjectClipboardAnchor] =
+    useState<DrawingPoint | null>(null);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
   const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
   const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
   const isDark = theme === "dark";
   const objectControlPanelClass = isDark
-    ? "pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-sm"
-    : "pointer-events-auto absolute -top-10 right-0 flex items-center gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm";
+    ? "pointer-events-auto absolute -bottom-48 left-0 z-50 flex flex-col items-stretch gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-sm"
+    : "pointer-events-auto absolute -bottom-48 left-0 z-50 flex flex-col items-stretch gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm";
   const objectControlButtonClass = isDark
     ? "rounded-md px-2 py-1 text-slate-100 hover:bg-slate-800"
     : "rounded-md px-2 py-1 text-gray-700 hover:bg-gray-100";
+  const selectionActionPanelClass = isDark
+    ? "pointer-events-auto absolute z-50 flex flex-col items-stretch gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-sm"
+    : "pointer-events-auto absolute z-50 flex flex-col items-stretch gap-1 rounded-lg border bg-white p-1 text-xs shadow-sm";
   const objectHandleClass = isDark
     ? "border-slate-500 bg-slate-900 shadow-sm"
     : "border bg-white shadow-sm";
   const textBoxMenuClass = isDark
-    ? "pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
-    : "pointer-events-auto absolute -top-7 left-24 z-30 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg";
+    ? "pointer-events-auto absolute -top-7 left-24 z-50 flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+    : "pointer-events-auto absolute -top-7 left-24 z-50 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg";
   const textBoxLabelClass = isDark
     ? "flex items-center gap-1 text-slate-100"
     : "flex items-center gap-1 text-gray-700";
   const drawingHeight = pageHeight * pageCount;
+
+  function clampValue(value: number, min: number, max: number) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function clampPosition(x: number, y: number, width: number, height: number) {
+    return {
+      x: clampValue(x, 0, Math.max(0, pageWidth - width)),
+      y: clampValue(y, 0, Math.max(0, drawingHeight - height)),
+    };
+  }
+
+  function clampMoveDelta(bounds: SelectionBox, dx: number, dy: number) {
+    return {
+      dx: clampValue(dx, -bounds.left, pageWidth - (bounds.left + bounds.width)),
+      dy: clampValue(dy, -bounds.top, drawingHeight - (bounds.top + bounds.height)),
+    };
+  }
+
+  function clampSizeForObject(
+    object: NoteObject,
+    width: number,
+    height: number
+  ) {
+    return {
+      width: Math.min(Math.max(1, width), Math.max(1, pageWidth - object.x)),
+      height: Math.min(Math.max(1, height), Math.max(1, drawingHeight - object.y)),
+    };
+  }
 
   function isPointInsidePaper(point: DrawingPoint) {
     return (
@@ -767,6 +812,22 @@ export function NoteObjectLayer({
     });
   }
 
+  function initializeTextBoxEditor(
+    editor: HTMLElement | null,
+    object: NoteObject
+  ) {
+    if (!editor) return;
+
+    const nextHtml = object.html ?? escapeHtml(object.text ?? "");
+
+    if (editor.dataset.lastObjectHtml === nextHtml) {
+      return;
+    }
+
+    editor.innerHTML = nextHtml;
+    editor.dataset.lastObjectHtml = nextHtml;
+  }
+
   function applyTextBoxStyle(
     object: NoteObject,
     updates: Pick<NoteObject, "color" | "fontSize" | "fontFamily"> & {
@@ -777,9 +838,9 @@ export function NoteObjectLayer({
     const editor = getTextBoxEditor(object.id);
     const range = editor ? getUsableTextSelection(editor) : null;
     const anchorTextToLine = (element: HTMLElement) => {
-      element.style.display = "inline-block";
-      element.style.lineHeight = "1";
-      element.style.verticalAlign = "bottom";
+      element.style.display = "inline";
+      element.style.lineHeight = "normal";
+      element.style.verticalAlign = "baseline";
     };
 
     if (!editor || !range) {
@@ -831,14 +892,134 @@ export function NoteObjectLayer({
     updateTextBoxContent(object.id, editor);
   }
 
-  function deleteObject(id: string) {
-    const deletedObject = objects.find((object) => object.id === id);
-    if (deletedObject?.type === "image" && deletedObject.src) {
-      void deleteStoredImage(deletedObject.src);
-    }
+  function getSelectionBounds(ids: string[]) {
+    const selectedIds = new Set(ids);
+    const selectedObjects = objects.filter((object) => selectedIds.has(object.id));
+    if (!selectedObjects.length) return null;
 
-    onChangeObjects(objects.filter((object) => object.id !== id));
-    onSelectionChange(selectedObjectIds.filter((selectedId) => selectedId !== id));
+    const bounds = selectedObjects.map(getObjectBounds);
+    const left = Math.min(...bounds.map((box) => box.left));
+    const top = Math.min(...bounds.map((box) => box.top));
+    const right = Math.max(...bounds.map((box) => box.left + box.width));
+    const bottom = Math.max(...bounds.map((box) => box.top + box.height));
+
+    return {
+      left,
+      top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+    };
+  }
+
+  function getDuplicateId(object: NoteObject, index: number) {
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${object.id}-copy-${Date.now()}-${index}`;
+  }
+
+  function cloneObjectsWithOffset(
+    sourceObjects: NoteObject[],
+    offset: number
+  ) {
+    return sourceObjects.map((object, index) => {
+      const duplicateId = getDuplicateId(object, index);
+
+      if (object.type === "line") {
+        const points = getLinePoints(object);
+        const bounds = getObjectBounds(object);
+        const clampedOffset = clampMoveDelta(bounds, offset, offset);
+
+        return {
+          ...object,
+          id: duplicateId,
+          x: points.startX + clampedOffset.dx,
+          y: points.startY + clampedOffset.dy,
+          endX: points.endX + clampedOffset.dx,
+          endY: points.endY + clampedOffset.dy,
+        };
+      }
+
+      return {
+        ...object,
+        id: duplicateId,
+        ...clampPosition(
+          object.x + offset,
+          object.y + offset,
+          object.width,
+          object.height
+        ),
+      };
+    });
+  }
+
+  function deleteSelectedObjects() {
+    if (selectedObjectIds.length === 0) return;
+
+    const selectedIds = new Set(selectedObjectIds);
+    objects.forEach((object) => {
+      if (selectedIds.has(object.id) && object.type === "image" && object.src) {
+        void deleteStoredImage(object.src);
+      }
+    });
+
+    onChangeObjects(objects.filter((object) => !selectedIds.has(object.id)));
+    onSelectionChange([]);
+  }
+
+  function cutSelectedObjects() {
+    if (selectedObjectIds.length === 0) return;
+
+    const selectedIds = new Set(selectedObjectIds);
+    const selectedObjects = objects.filter((object) => selectedIds.has(object.id));
+    const selectedBounds = getSelectionBounds(selectedObjectIds);
+
+    if (!selectedObjects.length) return;
+
+    setObjectClipboard(selectedObjects);
+    setObjectClipboardAnchor(
+      selectedBounds
+        ? {
+            x: selectedBounds.left,
+            y: selectedBounds.top + selectedBounds.height,
+          }
+        : null
+    );
+    onChangeObjects(objects.filter((object) => !selectedIds.has(object.id)));
+    onSelectionChange([]);
+  }
+
+  function copySelectedObjects() {
+    if (selectedObjectIds.length === 0) return;
+
+    const selectedIds = new Set(selectedObjectIds);
+    const selectedObjects = objects.filter((object) => selectedIds.has(object.id));
+    const selectedBounds = getSelectionBounds(selectedObjectIds);
+
+    if (!selectedObjects.length) return;
+
+    setObjectClipboard(selectedObjects);
+    setObjectClipboardAnchor(
+      selectedBounds
+        ? {
+            x: selectedBounds.left,
+            y: selectedBounds.top + selectedBounds.height,
+          }
+        : null
+    );
+  }
+
+  function pasteObjectClipboard() {
+    if (!objectClipboard.length) return;
+
+    const pastedObjects = cloneObjectsWithOffset(objectClipboard, 24);
+    onChangeObjects([...objects, ...pastedObjects]);
+    onSelectionChange(pastedObjects.map((object) => object.id));
+
+    const pastedBounds = pastedObjects.map(getObjectBounds);
+    const left = Math.min(...pastedBounds.map((box) => box.left));
+    const bottom = Math.max(...pastedBounds.map((box) => box.top + box.height));
+    setObjectClipboardAnchor({ x: left, y: bottom });
+    setObjectClipboard(pastedObjects);
   }
 
   function reorderSelectedObjects(direction: LayerDirection) {
@@ -864,20 +1045,98 @@ export function NoteObjectLayer({
 
   }
 
-  function renderLayerControls() {
+  function duplicateSelectedObjects() {
+    if (selectedObjectIds.length === 0) return;
+
+    const selectedIds = new Set(selectedObjectIds);
+    const duplicatedObjects = cloneObjectsWithOffset(
+      objects.filter(
+        (object) => selectedIds.has(object.id) && canDuplicateObject(object)
+      ),
+      24
+    );
+
+    if (!duplicatedObjects.length) return;
+
+    onChangeObjects([...objects, ...duplicatedObjects]);
+    onSelectionChange(duplicatedObjects.map((object) => object.id));
+  }
+
+  function renderActionToolbar() {
+    const canDuplicateSelection = objects.some(
+      (object) =>
+        selectedObjectIds.includes(object.id) && canDuplicateObject(object)
+    );
+
     return (
       <div className={objectControlPanelClass}>
-        {(["back", "front"] as LayerDirection[]).map(
-          (direction) => (
+        {renderMoveActionButton()}
+        {canDuplicateSelection && (
+          <button
+            type="button"
+            className={`${objectControlButtonClass} text-left`}
+            title="Duplicate selection"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              duplicateSelectedObjects();
+            }}
+          >
+            Duplicate
+          </button>
+        )}
+        {renderSelectionActionButton("Cut", "Cut selected objects", cutSelectedObjects)}
+        {renderSelectionActionButton("Copy", "Copy selected objects", copySelectedObjects)}
+        {objectClipboard.length > 0 &&
+          renderSelectionActionButton(
+            "Paste",
+            "Paste copied or cut objects",
+            pasteObjectClipboard
+          )}
+        {renderSelectionActionButton(
+          "Delete",
+          "Delete selected objects",
+          deleteSelectedObjects
+        )}
+      </div>
+    );
+  }
+
+  function renderMoveActionButton() {
+    return (
+      <div className="group relative">
+        <button
+          type="button"
+          className={`${objectControlButtonClass} w-full text-center`}
+          title="Move selected objects"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          Move
+        </button>
+        <div
+          className={
+            isDark
+              ? "pointer-events-auto absolute left-full top-0 z-50 ml-1 hidden min-w-20 flex-col gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 shadow-lg group-hover:flex"
+              : "pointer-events-auto absolute left-full top-0 z-50 ml-1 hidden min-w-20 flex-col gap-1 rounded-lg border bg-white p-1 shadow-lg group-hover:flex"
+          }
+        >
+          {(["front", "back"] as LayerDirection[]).map((direction) => (
             <button
               key={direction}
               type="button"
-              className={objectControlButtonClass}
-              title={
-                direction === "back"
-                  ? "Send to back"
-                  : "Bring to front"
-              }
+              className={`${objectControlButtonClass} text-left`}
+              title={direction === "back" ? "Send to back" : "Bring to front"}
               onPointerDown={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -890,9 +1149,34 @@ export function NoteObjectLayer({
             >
               {direction === "back" ? "Back" : "Front"}
             </button>
-          )
-        )}
+          ))}
+        </div>
       </div>
+    );
+  }
+
+  function renderSelectionActionButton(
+    label: string,
+    title: string,
+    action: () => void
+  ) {
+    return (
+      <button
+        type="button"
+        className={objectControlButtonClass}
+        title={title}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          action();
+        }}
+      >
+        {label}
+      </button>
     );
   }
 
@@ -921,10 +1205,15 @@ export function NoteObjectLayer({
         .filter((object) => movingIds.includes(object.id))
         .map((object) => [object.id, object])
     );
+    const movingBounds =
+      getSelectionBounds(movingIds) ?? getObjectBounds(draggedObject);
 
     function handleMove(moveEvent: PointerEvent) {
-      const dx = moveEvent.clientX - pointerX;
-      const dy = moveEvent.clientY - pointerY;
+      const moveDelta = clampMoveDelta(
+        movingBounds,
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
 
       onChangeObjects(
         objects.map((object) => {
@@ -935,21 +1224,24 @@ export function NoteObjectLayer({
             const points = getLinePoints(original);
             return {
               ...object,
-              x: points.startX + dx,
-              y: points.startY + dy,
-              endX: points.endX + dx,
-              endY: points.endY + dy,
+              x: points.startX + moveDelta.dx,
+              y: points.startY + moveDelta.dy,
+              endX: points.endX + moveDelta.dx,
+              endY: points.endY + moveDelta.dy,
             };
           }
 
-          const nextY = original.y + dy;
+          const nextPosition = clampPosition(
+            original.x + moveDelta.dx,
+            original.y + moveDelta.dy,
+            original.width,
+            original.height
+          );
+
           return {
             ...object,
-            x: original.x + dx,
-            y:
-              original.type === "textbox"
-                ? Math.round((nextY - 16) / 32) * 32 + 16
-                : nextY,
+            x: nextPosition.x,
+            y: nextPosition.y,
           };
         })
       );
@@ -977,22 +1269,38 @@ export function NoteObjectLayer({
     const pointerY = event.clientY;
     const originalWidth = object.width;
     const originalHeight = object.height;
+    const originalVertices = isVertexShape(object)
+      ? getShapeVertices(object)
+      : null;
+
+    function resizeObject(width: number, height: number) {
+      const nextSize = clampSizeForObject(object, width, height);
+
+      updateObject(object.id, {
+        width: nextSize.width,
+        height: nextSize.height,
+        ...(originalVertices
+          ? {
+              vertices: originalVertices.map((vertex) => ({
+                x: (vertex.x / Math.max(1, originalWidth)) * nextSize.width,
+                y: (vertex.y / Math.max(1, originalHeight)) * nextSize.height,
+              })),
+            }
+          : {}),
+      });
+    }
 
     function handleMove(moveEvent: PointerEvent) {
       const dx = moveEvent.clientX - pointerX;
       const dy = moveEvent.clientY - pointerY;
 
       if (mode === "horizontal") {
-        updateObject(object.id, {
-          width: Math.max(30, originalWidth + dx),
-        });
+        resizeObject(Math.max(30, originalWidth + dx), originalHeight);
         return;
       }
 
       if (mode === "vertical") {
-        updateObject(object.id, {
-          height: Math.max(30, originalHeight + dy),
-        });
+        resizeObject(originalWidth, Math.max(30, originalHeight + dy));
         return;
       }
 
@@ -1012,13 +1320,115 @@ export function NoteObjectLayer({
           width = height * aspectRatio;
         }
 
-        updateObject(object.id, { width, height });
+        const maxWidth = Math.max(1, pageWidth - object.x);
+        const maxHeight = Math.max(1, drawingHeight - object.y);
+
+        if (width > maxWidth) {
+          width = maxWidth;
+          height = width / aspectRatio;
+        }
+
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = height * aspectRatio;
+        }
+
+        resizeObject(width, height);
         return;
       }
 
+      resizeObject(
+        Math.max(30, originalWidth + dx),
+        Math.max(30, originalHeight + dy)
+      );
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function startLineEndpointDrag(
+    event: React.PointerEvent<HTMLDivElement>,
+    object: NoteObject,
+    endpoint: "start" | "end"
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange([object.id]);
+
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    const originalPoints = getLinePoints(object);
+    const snapDistance = 18;
+
+    function snapToNearbyLineEndpoint(x: number, y: number) {
+      let snappedPoint = {
+        x: clampValue(x, 0, pageWidth),
+        y: clampValue(y, 0, drawingHeight),
+      };
+      let closestDistance = snapDistance;
+
+      objects.forEach((lineObject) => {
+        if (lineObject.id === object.id || lineObject.type !== "line") return;
+
+        const linePoints = getLinePoints(lineObject);
+        [
+          { x: linePoints.startX, y: linePoints.startY },
+          { x: linePoints.endX, y: linePoints.endY },
+        ].forEach((targetPoint) => {
+          const clampedTargetPoint = {
+            x: clampValue(targetPoint.x, 0, pageWidth),
+            y: clampValue(targetPoint.y, 0, drawingHeight),
+          };
+          const distance = Math.hypot(
+            clampedTargetPoint.x - snappedPoint.x,
+            clampedTargetPoint.y - snappedPoint.y
+          );
+
+          if (distance <= closestDistance) {
+            closestDistance = distance;
+            snappedPoint = clampedTargetPoint;
+          }
+        });
+      });
+
+      return snappedPoint;
+    }
+
+    function handleMove(moveEvent: PointerEvent) {
+      const dx = moveEvent.clientX - pointerX;
+      const dy = moveEvent.clientY - pointerY;
+
+      if (endpoint === "start") {
+        const snappedStart = snapToNearbyLineEndpoint(
+          originalPoints.startX + dx,
+          originalPoints.startY + dy
+        );
+
+        updateObject(object.id, {
+          x: snappedStart.x,
+          y: snappedStart.y,
+          endX: originalPoints.endX,
+          endY: originalPoints.endY,
+        });
+        return;
+      }
+
+      const snappedEnd = snapToNearbyLineEndpoint(
+        originalPoints.endX + dx,
+        originalPoints.endY + dy
+      );
+
       updateObject(object.id, {
-        width: Math.max(30, originalWidth + dx),
-        height: Math.max(30, originalHeight + dy),
+        x: originalPoints.startX,
+        y: originalPoints.startY,
+        endX: snappedEnd.x,
+        endY: snappedEnd.y,
       });
     }
 
@@ -1423,50 +1833,6 @@ export function NoteObjectLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function startLineEndpointDrag(
-    event: React.PointerEvent<HTMLDivElement>,
-    object: NoteObject,
-    endpoint: "start" | "end"
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-    onSelectionChange([object.id]);
-
-    const pointerX = event.clientX;
-    const pointerY = event.clientY;
-    const points = getLinePoints(object);
-
-    function handleMove(moveEvent: PointerEvent) {
-      const dx = moveEvent.clientX - pointerX;
-      const dy = moveEvent.clientY - pointerY;
-
-      updateObject(
-        object.id,
-        endpoint === "start"
-          ? {
-              x: points.startX + dx,
-              y: points.startY + dy,
-              endX: points.endX,
-              endY: points.endY,
-            }
-          : {
-              x: points.startX,
-              y: points.startY,
-              endX: points.endX + dx,
-              endY: points.endY + dy,
-            }
-      );
-    }
-
-    function handleUp() {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    }
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-  }
-
   function startVertexDrag(
     event: React.PointerEvent<HTMLDivElement>,
     object: NoteObject,
@@ -1487,8 +1853,12 @@ export function NoteObjectLayer({
       const movedVertices = absoluteVertices.map((vertex, index) =>
         index === vertexIndex
           ? {
-              x: vertex.x + moveEvent.clientX - pointerX,
-              y: vertex.y + moveEvent.clientY - pointerY,
+              x: clampValue(vertex.x + moveEvent.clientX - pointerX, 0, pageWidth),
+              y: clampValue(
+                vertex.y + moveEvent.clientY - pointerY,
+                0,
+                drawingHeight
+              ),
             }
           : vertex
       );
@@ -1538,8 +1908,12 @@ export function NoteObjectLayer({
     onSelectionChange([]);
 
     function handleMove(moveEvent: PointerEvent) {
-      const currentX = moveEvent.clientX - layerLeft;
-      const currentY = moveEvent.clientY - layerTop;
+      const currentX = clampValue(moveEvent.clientX - layerLeft, 0, pageWidth);
+      const currentY = clampValue(
+        moveEvent.clientY - layerTop,
+        0,
+        drawingHeight
+      );
       const box = {
         left: Math.min(startX, currentX),
         top: Math.min(startY, currentY),
@@ -1566,6 +1940,14 @@ export function NoteObjectLayer({
   }
 
   const hasSingleSelection = selectedObjectIds.length === 1;
+  const hasGroupSelection = selectedObjectIds.length > 1;
+  const selectedGroupBounds = hasGroupSelection
+    ? getSelectionBounds(selectedObjectIds)
+    : null;
+  const canDuplicateGroupSelection = objects.some(
+    (object) =>
+      selectedObjectIds.includes(object.id) && canDuplicateObject(object)
+  );
 
   return (
     <div
@@ -1673,9 +2055,14 @@ export function NoteObjectLayer({
 
         if (object.type === "line") {
           const points = getLinePoints(object);
+          const lineStrokeWidth = object.strokeWidth ?? 5;
 
           return (
-            <div key={object.id} className="pointer-events-none absolute inset-0">
+            <div
+              key={object.id}
+              className="pointer-events-none absolute inset-0"
+              style={{ zIndex: selected ? 60 : undefined }}
+            >
               <svg className="absolute inset-0 h-full w-full overflow-visible">
                 {selected && (
                   <line
@@ -1684,7 +2071,7 @@ export function NoteObjectLayer({
                     x2={points.endX}
                     y2={points.endY}
                     stroke="#2563eb"
-                    strokeWidth="11"
+                    strokeWidth={Math.max(11, lineStrokeWidth + 6)}
                     strokeLinecap="round"
                     opacity="0.35"
                   />
@@ -1695,7 +2082,7 @@ export function NoteObjectLayer({
                   x2={points.endX}
                   y2={points.endY}
                   stroke={object.color ?? "#111827"}
-                  strokeWidth="5"
+                  strokeWidth={lineStrokeWidth}
                   strokeLinecap="round"
                 />
                 <line
@@ -1704,7 +2091,7 @@ export function NoteObjectLayer({
                   x2={points.endX}
                   y2={points.endY}
                   stroke="transparent"
-                  strokeWidth="20"
+                  strokeWidth={Math.max(20, lineStrokeWidth + 14)}
                   className="pointer-events-auto cursor-move"
                   onPointerDown={(event) => startDrag(event, object)}
                 />
@@ -1716,41 +2103,91 @@ export function NoteObjectLayer({
                     className="absolute"
                     style={{ left: points.startX, top: points.startY }}
                   >
-                    {renderLayerControls()}
+                    {renderActionToolbar()}
                   </div>
+                  <button
+                    type="button"
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute rounded-md bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm ring-1 ring-slate-700"
+                        : "pointer-events-auto absolute rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                    }
+                    style={{ left: points.startX + 12, top: points.startY - 30 }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setOpenShapeMenuId((current) =>
+                        current === object.id ? null : object.id
+                      );
+                    }}
+                  >
+                    ...
+                  </button>
+
+                  {openShapeMenuId === object.id && (
+                    <div
+                      className={
+                        isDark
+                          ? "pointer-events-auto absolute z-50 w-44 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+                          : "pointer-events-auto absolute z-50 w-44 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                      }
+                      style={{ left: points.startX + 48, top: points.startY - 32 }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <label className={isDark ? "block text-slate-100" : "block text-gray-700"}>
+                        Thickness: {lineStrokeWidth}px
+                        <input
+                          type="range"
+                          min="1"
+                          max="24"
+                          value={lineStrokeWidth}
+                          className="mt-2 w-full"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            updateObject(object.id, {
+                              strokeWidth: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
                   <div
-                    className={`pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    }
                     style={{ left: points.startX, top: points.startY }}
+                    title="Move line start point"
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "start")
                     }
                   />
                   <div
-                    className={`pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    }
                     style={{ left: points.endX, top: points.endY }}
+                    title="Move line end point"
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "end")
                     }
                   />
-                  <button
-                    type="button"
-                    className="pointer-events-auto absolute -translate-y-full rounded-full bg-red-500 px-2 text-xs text-white"
-                    style={{ left: points.endX + 12, top: points.endY - 8 }}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      deleteObject(object.id);
-                    }}
-                  >
-                    ×
-                  </button>
                 </>
               )}
             </div>
           );
         }
 
-        const ignoreDuringDrawing = drawingMode;
+        const ignoreDuringDrawing = drawingMode && object.type !== "textbox";
         const shapeVertices = isVertexShape(object)
           ? getShapeVertices(object)
           : [];
@@ -1772,6 +2209,7 @@ export function NoteObjectLayer({
               top: object.y,
               width: object.width,
               height: object.height,
+              zIndex: selected ? 60 : undefined,
               transform: `scale(${object.flipX ? -1 : 1}, ${
                 object.flipY ? -1 : 1
               })`,
@@ -1791,7 +2229,7 @@ export function NoteObjectLayer({
                 {selected && hasSingleSelection && (
                   <>
                     <div
-                      className="absolute -top-7 left-0 rounded-md bg-black px-2 py-1 text-xs text-white"
+                      className="absolute -top-7 left-8 rounded-md bg-black px-2 py-1 text-xs text-white"
                       onPointerDown={(event) => startDrag(event, object)}
                     >
                       Move
@@ -1908,17 +2346,15 @@ export function NoteObjectLayer({
                 )}
                 <div
                   data-textbox-editor={object.id}
+                  ref={(editor) => initializeTextBoxEditor(editor, object)}
                   contentEditable
                   suppressContentEditableWarning
-                  className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...'] [&_span]:inline-block [&_span]:align-bottom [&_span]:leading-none [&_*]:align-bottom"
+                  className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...']"
                   style={{
                     color: object.color ?? (isDark ? "#f8fafc" : "#111827"),
                     fontSize: `${object.fontSize ?? 16}px`,
                     fontFamily: object.fontFamily ?? "Arial",
-                    lineHeight: "32px",
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: object.html ?? escapeHtml(object.text ?? ""),
+                    lineHeight: "normal",
                   }}
                   onPointerDown={(event) => {
                     event.stopPropagation();
@@ -1927,12 +2363,18 @@ export function NoteObjectLayer({
                   onMouseUp={(event) => saveTextSelection(event.currentTarget)}
                   onKeyUp={(event) => saveTextSelection(event.currentTarget)}
                   onInput={(event) =>
-                    updateTextBoxContent(object.id, event.currentTarget)
+                    {
+                      event.currentTarget.dataset.lastObjectHtml =
+                        event.currentTarget.innerHTML;
+                      updateTextBoxContent(object.id, event.currentTarget);
+                    }
                   }
                   onPaste={(event) => {
                     event.preventDefault();
                     const text = event.clipboardData.getData("text/plain");
                     document.execCommand("insertText", false, text);
+                    event.currentTarget.dataset.lastObjectHtml =
+                      event.currentTarget.innerHTML;
                     updateTextBoxContent(object.id, event.currentTarget);
                   }}
                 />
@@ -2062,8 +2504,8 @@ export function NoteObjectLayer({
                   <div
                     className={
                       isDark
-                        ? "pointer-events-auto absolute -top-7 left-12 z-30 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
-                        : "pointer-events-auto absolute -top-7 left-12 z-30 flex items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                        ? "pointer-events-auto absolute -top-7 left-12 z-50 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+                        : "pointer-events-auto absolute -top-7 left-12 z-50 flex items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
                     }
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
@@ -2109,7 +2551,7 @@ export function NoteObjectLayer({
 
             {selected && hasSingleSelection && (
               <>
-                {renderLayerControls()}
+                {renderActionToolbar()}
 
                 {(object.type === "image" || object.type === "sticker") && (
                   <>
@@ -2155,22 +2597,60 @@ export function NoteObjectLayer({
                     }
                   />
                 )}
-                <button
-                  type="button"
-                  className="absolute -right-3 -top-3 rounded-full bg-red-500 px-2 text-xs text-white"
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    deleteObject(object.id);
-                  }}
-                >
-                  ×
-                </button>
               </>
             )}
           </div>
         );
       })}
+
+      {selectedGroupBounds && (
+        <div
+          className={selectionActionPanelClass}
+          style={{
+            left: selectedGroupBounds.left,
+            top: selectedGroupBounds.top + selectedGroupBounds.height + 8,
+            zIndex: 80,
+          }}
+        >
+          {renderMoveActionButton()}
+          {canDuplicateGroupSelection &&
+            renderSelectionActionButton(
+              "Duplicate",
+              "Duplicate selected objects",
+              duplicateSelectedObjects
+            )}
+          {renderSelectionActionButton("Cut", "Cut selected objects", cutSelectedObjects)}
+          {renderSelectionActionButton("Copy", "Copy selected objects", copySelectedObjects)}
+          {objectClipboard.length > 0 &&
+            renderSelectionActionButton(
+              "Paste",
+              "Paste copied or cut objects",
+              pasteObjectClipboard
+            )}
+          {renderSelectionActionButton(
+            "Delete",
+            "Delete selected objects",
+            deleteSelectedObjects
+          )}
+        </div>
+      )}
+
+      {!selectedGroupBounds && objectClipboard.length > 0 && objectClipboardAnchor && (
+        <div
+          className={selectionActionPanelClass}
+          style={{
+            left: objectClipboardAnchor.x + 8,
+            top: objectClipboardAnchor.y + 8,
+            zIndex: 80,
+          }}
+        >
+          {renderSelectionActionButton(
+            "Paste",
+            "Paste cut objects",
+            pasteObjectClipboard
+          )}
+        </div>
+      )}
 
       {selectionBox && (
         <div
