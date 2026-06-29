@@ -598,6 +598,10 @@ export function NoteObjectLayer({
     clearLiveDrawingCanvas();
   }
 
+  function isDrawingPointer(event: PointerEvent | React.PointerEvent) {
+    return event.pointerType === "pen" || event.pointerType === "mouse";
+  }
+
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
     if (!isPointInsidePaper(nextPoint)) return;
 
@@ -690,6 +694,14 @@ export function NoteObjectLayer({
     }
 
     function handlePointerDown(event: PointerEvent) {
+
+      if (!isDrawingPointer(event)) {
+        return;
+      }
+
+      event.preventDefault();
+      activeCanvas.setPointerCapture(event.pointerId);
+
       if (!drawingModeRef.current || drawingToolRef.current !== "draw") return;
       if (!canUsePointerForDrawing(event)) return;
 
@@ -704,6 +716,12 @@ export function NoteObjectLayer({
     }
 
     function handlePointerMove(event: PointerEvent) {
+
+      if (!isDrawingPointer(event)) {
+        return;
+      }
+
+      event.preventDefault();
       if (canvasDrawingPointerIdRef.current !== event.pointerId) return;
 
       event.preventDefault();
@@ -721,6 +739,18 @@ export function NoteObjectLayer({
     }
 
     function handlePointerEnd(event: PointerEvent) {
+
+      if (!isDrawingPointer(event)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      try {
+        activeCanvas.releasePointerCapture(event.pointerId);
+      } catch {
+        // pointer might already be released
+      }
       if (canvasDrawingPointerIdRef.current !== event.pointerId) return;
 
       event.preventDefault();
@@ -2252,17 +2282,22 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: drawingMode || selectionMode ? "none" : "auto",
+        touchAction: "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior: drawingMode || selectionMode ? "none" : undefined,
+        overscrollBehavior: "auto",
       }}
       onPointerDown={(event) => {
         if (drawingMode) {
+          if (!isDrawingPointer(event)) {
+            return;
+          }
+
           if (drawingTool === "erase") {
             startErasing(event);
           }
+
           return;
         }
 
@@ -2272,7 +2307,7 @@ export function NoteObjectLayer({
       {drawingMode && drawingTool === "draw" && (
         <canvas
           ref={liveDrawingCanvasRef}
-          className="absolute inset-0 z-30 h-full w-full touch-none"
+          className="absolute inset-0 z-30 h-full w-full"
           style={{
             width: pageWidth,
             height: drawingHeight,
