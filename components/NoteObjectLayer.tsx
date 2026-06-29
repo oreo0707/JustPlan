@@ -402,6 +402,7 @@ export function NoteObjectLayer({
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
+  const pendingDrawingsRef = useRef<NoteObject[]>([]);
   const [objectClipboard, setObjectClipboard] = useState<NoteObject[]>([]);
   const [objectClipboardAnchor, setObjectClipboardAnchor] =
     useState<DrawingPoint | null>(null);
@@ -520,23 +521,38 @@ export function NoteObjectLayer({
   }
 
   function undoPendingDrawingStroke() {
-    setPendingDrawings((current) => {
-      if (current.length === 0) return current;
+    const previousSnapshot = pendingDrawingUndoStackRef.current.pop();
 
-      pendingDrawingRedoStackRef.current = [
-        ...pendingDrawingRedoStackRef.current.slice(-49),
-        current,
-      ];
+    if (!previousSnapshot) {
+      return;
+    }
 
-      return current.slice(0, -1);
-    });
+    pendingDrawingRedoStackRef.current = [
+      ...pendingDrawingRedoStackRef.current.slice(-49),
+      cloneDrawingSnapshot(pendingDrawingsRef.current),
+    ];
+
+    replacePendingDrawings(previousSnapshot);
   }
 
   function redoPendingDrawingStroke() {
-    const nextPendingDrawings = pendingDrawingRedoStackRef.current.pop();
-    if (!nextPendingDrawings) return;
+    const nextSnapshot = pendingDrawingRedoStackRef.current.pop();
 
-    setPendingDrawings(nextPendingDrawings);
+    if (!nextSnapshot) {
+      return;
+    }
+
+    pushPendingDrawingUndoSnapshot(pendingDrawingsRef.current);
+    replacePendingDrawings(nextSnapshot);
+  }
+  
+  function cloneDrawingSnapshot(drawings: NoteObject[]) {
+    return structuredClone(drawings) as NoteObject[];
+  }
+
+  function replacePendingDrawings(nextDrawings: NoteObject[]) {
+    pendingDrawingsRef.current = nextDrawings;
+    setPendingDrawings(nextDrawings);
   }
 
   function commitDrawingPoints(finalPoints: DrawingPoint[]) {
@@ -571,9 +587,13 @@ export function NoteObjectLayer({
       flipY: false,
     };
 
-    pushPendingDrawingUndoSnapshot();
+    const currentPendingDrawings = pendingDrawingsRef.current;
+    const nextPendingDrawings = [...currentPendingDrawings, newDrawing];
+
+    pushPendingDrawingUndoSnapshot(currentPendingDrawings);
     pendingDrawingRedoStackRef.current = [];
-    setPendingDrawings((current) => [...current, newDrawing]);
+    replacePendingDrawings(nextPendingDrawings);
+
     onSelectionChange([]);
     clearLiveDrawingCanvas();
   }
@@ -809,7 +829,7 @@ export function NoteObjectLayer({
     lastHandledSaveRequestIdRef.current = saveRequestId;
     onChangeObjects([...objects, ...pendingDrawings]);
     window.setTimeout(() => {
-      setPendingDrawings([]);
+      replacePendingDrawings([]);
       pendingDrawingUndoStackRef.current = [];
       pendingDrawingRedoStackRef.current = [];
     }, 0);
@@ -844,16 +864,17 @@ export function NoteObjectLayer({
     window.setTimeout(redoPendingDrawingStroke, 0);
   }, [redoRequestId]);
 
-  function pushPendingDrawingUndoSnapshot(nextSnapshot = pendingDrawings) {
+  function pushPendingDrawingUndoSnapshot(snapshot: NoteObject[]) {
+    const snapshotCopy = cloneDrawingSnapshot(snapshot);
     const latestSnapshot = pendingDrawingUndoStackRef.current.at(-1);
 
-    if (JSON.stringify(latestSnapshot) === JSON.stringify(nextSnapshot)) {
+    if (JSON.stringify(latestSnapshot) === JSON.stringify(snapshotCopy)) {
       return;
     }
 
     pendingDrawingUndoStackRef.current = [
       ...pendingDrawingUndoStackRef.current.slice(-49),
-      nextSnapshot,
+      snapshotCopy,
     ];
   }
 
@@ -1569,7 +1590,7 @@ export function NoteObjectLayer({
     const erasingElement = event.currentTarget;
     const pointerId = event.pointerId;
     let workingObjects = objects;
-    let workingPendingDrawings = pendingDrawings;
+    let workingPendingDrawings = pendingDrawingsRef.current;
     const eraserRadius = Math.max(2, drawingStrokeWidth / 2);
     let pendingUndoSnapshotCaptured = false;
 
@@ -1613,7 +1634,7 @@ export function NoteObjectLayer({
         }
 
         workingPendingDrawings = nextPendingDrawings;
-        setPendingDrawings(nextPendingDrawings);
+        replacePendingDrawings(nextPendingDrawings);
       }
 
       if (savedChanged || pendingChanged) {
@@ -1728,8 +1749,12 @@ export function NoteObjectLayer({
       flipY: false,
     };
 
-    pushPendingDrawingUndoSnapshot();
-    setPendingDrawings((current) => [...current, newDrawing]);
+    const currentPendingDrawings = pendingDrawingsRef.current;
+    const nextPendingDrawings = [...currentPendingDrawings, newDrawing];
+
+    pushPendingDrawingUndoSnapshot(currentPendingDrawings);
+    pendingDrawingRedoStackRef.current = [];
+    replacePendingDrawings(nextPendingDrawings);
     onSelectionChange([]);
   }
 
