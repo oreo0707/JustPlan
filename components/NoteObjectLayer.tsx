@@ -1186,7 +1186,9 @@ export function NoteObjectLayer({
   ) {
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const dragElement = event.currentTarget;
+    const pointerId = event.pointerId;
+    dragElement.setPointerCapture?.(pointerId);
 
     const canMoveAsGroup =
       draggedObject.type !== "textbox" &&
@@ -1250,9 +1252,9 @@ export function NoteObjectLayer({
       );
     }
 
-    function handleUp(upEvent: PointerEvent) {
-      if (event.currentTarget.hasPointerCapture?.(upEvent.pointerId)) {
-        event.currentTarget.releasePointerCapture?.(upEvent.pointerId);
+    function handleUp() {
+      if (dragElement.hasPointerCapture?.(pointerId)) {
+        dragElement.releasePointerCapture?.(pointerId);
       }
 
       window.removeEventListener("pointermove", handleMove);
