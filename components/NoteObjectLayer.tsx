@@ -1186,6 +1186,7 @@ export function NoteObjectLayer({
   ) {
     event.preventDefault();
     event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
 
     const canMoveAsGroup =
       draggedObject.type !== "textbox" &&
@@ -1209,6 +1210,8 @@ export function NoteObjectLayer({
       getSelectionBounds(movingIds) ?? getObjectBounds(draggedObject);
 
     function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
       const moveDelta = clampMoveDelta(
         movingBounds,
         moveEvent.clientX - pointerX,
@@ -1247,7 +1250,11 @@ export function NoteObjectLayer({
       );
     }
 
-    function handleUp() {
+    function handleUp(upEvent: PointerEvent) {
+      if (event.currentTarget.hasPointerCapture?.(upEvent.pointerId)) {
+        event.currentTarget.releasePointerCapture?.(upEvent.pointerId);
+      }
+
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
     }
@@ -1291,6 +1298,8 @@ export function NoteObjectLayer({
     }
 
     function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
       const dx = moveEvent.clientX - pointerX;
       const dy = moveEvent.clientY - pointerY;
 
@@ -1401,6 +1410,8 @@ export function NoteObjectLayer({
     }
 
     function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
       const dx = moveEvent.clientX - pointerX;
       const dy = moveEvent.clientY - pointerY;
 
@@ -1850,6 +1861,8 @@ export function NoteObjectLayer({
     }));
 
     function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
       const movedVertices = absoluteVertices.map((vertex, index) =>
         index === vertexIndex
           ? {
@@ -2093,6 +2106,7 @@ export function NoteObjectLayer({
                   stroke="transparent"
                   strokeWidth={Math.max(20, lineStrokeWidth + 14)}
                   className="pointer-events-auto cursor-move"
+                  style={{ touchAction: "none" }}
                   onPointerDown={(event) => startDrag(event, object)}
                 />
               </svg>
@@ -2160,10 +2174,10 @@ export function NoteObjectLayer({
                   <div
                     className={
                       isDark
-                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
-                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
                     }
-                    style={{ left: points.startX, top: points.startY }}
+                    style={{ left: points.startX, top: points.startY, touchAction: "none" }}
                     title="Move line start point"
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "start")
@@ -2172,10 +2186,10 @@ export function NoteObjectLayer({
                   <div
                     className={
                       isDark
-                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
-                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
                     }
-                    style={{ left: points.endX, top: points.endY }}
+                    style={{ left: points.endX, top: points.endY, touchAction: "none" }}
                     title="Move line end point"
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "end")
@@ -2210,6 +2224,9 @@ export function NoteObjectLayer({
               width: object.width,
               height: object.height,
               zIndex: selected ? 60 : undefined,
+              touchAction: object.type === "textbox" ? "auto" : "none",
+              WebkitUserSelect: object.type === "textbox" ? undefined : "none",
+              userSelect: object.type === "textbox" ? undefined : "none",
               transform: `scale(${object.flipX ? -1 : 1}, ${
                 object.flipY ? -1 : 1
               })`,
@@ -2541,7 +2558,7 @@ export function NoteObjectLayer({
               shapeVertices.map((vertex, index) => (
                 <div
                   key={`${object.id}-vertex-${index}`}
-                  className={`absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                      className={`absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                   style={{ left: vertex.x, top: vertex.y }}
                   onPointerDown={(event) =>
                     startVertexDrag(event, object, index)
@@ -2556,21 +2573,21 @@ export function NoteObjectLayer({
                 {(object.type === "image" || object.type === "sticker") && (
                   <>
                     <div
-                      className={`absolute -right-2 top-1/2 h-7 w-3 -translate-y-1/2 cursor-ew-resize rounded-full ${objectHandleClass}`}
+                      className={`absolute -right-2 top-1/2 h-7 w-3 -translate-y-1/2 touch-none cursor-ew-resize rounded-full ${objectHandleClass}`}
                       title="Resize width"
                       onPointerDown={(event) =>
                         startResize(event, object, "horizontal")
                       }
                     />
                     <div
-                      className={`absolute -bottom-2 left-1/2 h-3 w-7 -translate-x-1/2 cursor-ns-resize rounded-full ${objectHandleClass}`}
+                      className={`absolute -bottom-2 left-1/2 h-3 w-7 -translate-x-1/2 touch-none cursor-ns-resize rounded-full ${objectHandleClass}`}
                       title="Resize height"
                       onPointerDown={(event) =>
                         startResize(event, object, "vertical")
                       }
                     />
                     <div
-                      className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                      className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                       title="Scale proportionally"
                       onPointerDown={(event) =>
                         startResize(event, object, "proportional")
@@ -2580,7 +2597,7 @@ export function NoteObjectLayer({
                 )}
                 {isVertexShape(object) && shapeEditMode === "resize" && (
                   <div
-                    className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                    className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
                     title="Resize proportionally"
                     onPointerDown={(event) =>
                       startResize(event, object, "proportional")
@@ -2591,7 +2608,7 @@ export function NoteObjectLayer({
                   object.type !== "image" &&
                   object.type !== "sticker" && (
                   <div
-                    className={`absolute -right-2 -bottom-2 h-4 w-4 cursor-se-resize rounded-full ${objectHandleClass}`}
+                    className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-se-resize rounded-full ${objectHandleClass}`}
                     onPointerDown={(event) =>
                       startResize(event, object, "free")
                     }
