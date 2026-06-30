@@ -567,7 +567,7 @@ export default function SettingsPage() {
 
               {feedbackStatus === "sent" && (
                 <p className="text-sm text-green-600">
-                  Thanks — your anonymous feedback was sent.
+                  Thanks — your anonymous feedback was sent to Discord.
                 </p>
               )}
 

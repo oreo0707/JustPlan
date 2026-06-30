@@ -63,12 +63,14 @@ async function sendToWebhook(feedback: {
   const webhookUrl = process.env.FEEDBACK_WEBHOOK_URL;
 
   if (!webhookUrl) {
-    console.info("Anonymous Just Study feedback:", feedback);
-    return;
+    console.warn("FEEDBACK_WEBHOOK_URL is missing. Feedback was not delivered.");
+    return { delivered: false, reason: "missing-webhook" };
   }
 
   const webhookText = buildWebhookText(feedback);
-  const isDiscordWebhook = webhookUrl.includes("discord.com/api/webhooks");
+  const isDiscordWebhook =
+    webhookUrl.includes("discord.com/api/webhooks") ||
+    webhookUrl.includes("discordapp.com/api/webhooks");
   const isSlackWebhook = webhookUrl.includes("hooks.slack.com");
 
   const body = isDiscordWebhook
@@ -89,8 +91,14 @@ async function sendToWebhook(feedback: {
   });
 
   if (!response.ok) {
-    throw new Error("Feedback webhook request failed.");
+    const responseText = await response.text().catch(() => "");
+
+    throw new Error(
+      `Feedback webhook request failed with ${response.status}. ${responseText}`
+    );
   }
+
+  return { delivered: true, reason: "webhook" };
 }
 
 export async function POST(request: Request) {
@@ -120,9 +128,19 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
 
-    await sendToWebhook(feedback);
+    const delivery = await sendToWebhook(feedback);
 
-    return Response.json({ ok: true });
+    if (!delivery.delivered) {
+      return Response.json(
+        {
+          error:
+            "Feedback webhook is not configured yet. Add FEEDBACK_WEBHOOK_URL in Vercel and redeploy.",
+        },
+        { status: 500 }
+      );
+    }
+
+    return Response.json({ ok: true, delivered: true });
   } catch (error) {
     console.error("Feedback submission failed:", error);
 
