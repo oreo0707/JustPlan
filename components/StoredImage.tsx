@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
   isStoredImageReference,
@@ -10,16 +11,19 @@ type StoredImageProps = {
   src: string;
   alt: string;
   className?: string;
+  style?: CSSProperties;
 };
 
 function IndexedDatabaseImage({
   reference,
   alt,
   className,
+  style,
 }: {
   reference: string;
   alt: string;
   className?: string;
+  style?: CSSProperties;
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
@@ -40,15 +44,36 @@ function IndexedDatabaseImage({
   }, [reference]);
 
   if (!objectUrl) {
-    return <div className={`${className ?? ""} animate-pulse bg-gray-100`} />;
+    return (
+      <div
+        className={`${className ?? ""} animate-pulse bg-gray-100`}
+        style={style}
+      />
+    );
   }
 
-  return <img src={objectUrl} alt={alt} className={className} draggable={false} />;
+  return (
+    <img
+      src={objectUrl}
+      alt={alt}
+      className={className}
+      style={style}
+      draggable={false}
+    />
+  );
 }
 
-export function StoredImage({ src, alt, className }: StoredImageProps) {
+export function StoredImage({ src, alt, className, style }: StoredImageProps) {
   if (!isStoredImageReference(src)) {
-    return <img src={src} alt={alt} className={className} draggable={false} />;
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        style={style}
+        draggable={false}
+      />
+    );
   }
 
   return (
@@ -56,6 +81,7 @@ export function StoredImage({ src, alt, className }: StoredImageProps) {
       reference={src}
       alt={alt}
       className={className}
+      style={style}
     />
   );
 }

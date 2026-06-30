@@ -1,7 +1,18 @@
-import type { AppData, Note, NoteObject, NoteTemplate, Subject } from "./types";
+import type {
+  AppData,
+  Note,
+  NoteMaterial,
+  NoteObject,
+  NoteTemplate,
+  Subject,
+} from "./types";
 
 function generateId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function removeMaterialFileExtension(fileName: string) {
+  return fileName.replace(/\.(pdf|docx?)$/i, "");
 }
 
 export function addSubject(
@@ -210,6 +221,7 @@ export function addNoteToSubject(
     content: "",
     template: data.settings.default_note_template,
     objects: [],
+    materials: [],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     position: 0,
@@ -268,6 +280,38 @@ export function updateNoteTitle(
             ? { ...note, title, updated_at: new Date().toISOString() }
             : note
         ),
+      };
+    }),
+  };
+}
+
+export function addMaterialNoteToSubject(
+  data: AppData,
+  subjectId: string,
+  material: NoteMaterial
+): AppData {
+  const newNote: Note = {
+    id: generateId("note"),
+    title: removeMaterialFileExtension(material.name),
+    content: "",
+    template: data.settings.default_note_template,
+    objects: [],
+    materials: [material],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    position: 0,
+  };
+
+  return {
+    ...data,
+    subjects: data.subjects.map((subject) => {
+      if (subject.id !== subjectId) {
+        return subject;
+      }
+
+      return {
+        ...subject,
+        notes: [...subject.notes, newNote],
       };
     }),
   };
@@ -366,6 +410,41 @@ export function updateNoteObjects(
   };
 }
 
+export function updateNotePages(
+  data: AppData,
+  subjectId: string,
+  noteId: string,
+  updates: {
+    objects?: NoteObject[];
+    page_count?: number;
+    page_bookmarks?: number[];
+  }
+): AppData {
+  return {
+    ...data,
+    subjects: data.subjects.map((subject) => {
+      if (subject.id !== subjectId) {
+        return subject;
+      }
+
+      return {
+        ...subject,
+        notes: subject.notes.map((note) => {
+          if (note.id !== noteId) {
+            return note;
+          }
+
+          return {
+            ...note,
+            ...updates,
+            updated_at: new Date().toISOString(),
+          };
+        }),
+      };
+    }),
+  };
+}
+
 export function updateSettings(
   data: AppData,
   settings: Partial<AppData["settings"]>
@@ -376,5 +455,36 @@ export function updateSettings(
       ...data.settings,
       ...settings,
     },
+  };
+}
+
+export function updateNoteMaterials(
+  data: AppData,
+  subjectId: string,
+  noteId: string,
+  materials: NoteMaterial[]
+): AppData {
+  return {
+    ...data,
+    subjects: data.subjects.map((subject) => {
+      if (subject.id !== subjectId) {
+        return subject;
+      }
+
+      return {
+        ...subject,
+        notes: subject.notes.map((note) => {
+          if (note.id !== noteId) {
+            return note;
+          }
+
+          return {
+            ...note,
+            materials,
+            updated_at: new Date().toISOString(),
+          };
+        }),
+      };
+    }),
   };
 }

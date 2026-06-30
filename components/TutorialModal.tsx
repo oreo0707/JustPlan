@@ -53,37 +53,53 @@ export function TutorialModal({
     if (!target) return;
     const tutorialTarget = target;
 
-    function updateAnchor() {
+    function isTargetInView() {
       const rect = tutorialTarget.getBoundingClientRect();
 
-      const isVisible =
+      return (
         rect.bottom > 0 &&
         rect.top < window.innerHeight &&
         rect.right > 0 &&
-        rect.left < window.innerWidth;
+        rect.left < window.innerWidth
+      );
+    }
 
-      if (!isVisible) {
-        setAnchor((current) =>
-          current?.target === selector ? null : current
-        );
+    function scrollTargetIntoView() {
+      tutorialTarget.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+    }
+
+    function updateAnchor() {
+      const rect = tutorialTarget.getBoundingClientRect();
+
+      if (!isTargetInView()) {
         tutorialTarget.classList.remove("tutorial-active-target");
+        scrollTargetIntoView();
         return;
       }
 
-      const gap = 16;
-      const margin = 16;
-      const panelWidth = panelRef.current?.offsetWidth ?? 340;
-      const panelHeight = panelRef.current?.offsetHeight ?? 260;
+      const gap = 10;
+      const margin = 12;
+      const panelWidth = panelRef.current?.offsetWidth ?? 300;
+      const panelHeight = panelRef.current?.offsetHeight ?? 210;
+      const isWideTarget = rect.width >= panelWidth + gap * 4;
 
       let left = rect.right + gap;
-      let top = rect.top;
+      let top = rect.top + Math.min(20, rect.height / 3);
 
-      // Move panel to the left if there is no room on the right.
-      if (left + panelWidth > window.innerWidth - margin) {
+      if (isWideTarget) {
+        left = Math.min(
+          rect.right - panelWidth - gap,
+          window.innerWidth - panelWidth - margin
+        );
+        top = rect.top + Math.min(64, Math.max(18, rect.height / 3));
+      } else if (left + panelWidth > window.innerWidth - margin) {
         left = rect.left - panelWidth - gap;
       }
 
-      // Place it below if neither side has enough room.
       if (left < margin) {
         left = Math.min(
           Math.max(margin, rect.left),
@@ -106,7 +122,15 @@ export function TutorialModal({
       });
     }
 
-    const frame = window.requestAnimationFrame(updateAnchor);
+    const frame = window.requestAnimationFrame(() => {
+      setAnchor(null);
+
+      if (!isTargetInView()) {
+        scrollTargetIntoView();
+      }
+
+      updateAnchor();
+    });
 
     const observer = new IntersectionObserver(updateAnchor, {
       threshold: 0.15,
@@ -131,8 +155,7 @@ export function TutorialModal({
 
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === steps.length - 1;
-  const isTargetVisible =
-    !step.target || anchor?.target === step.target;
+  const isTargetVisible = !step.target || anchor?.target === step.target;
 
   function handleNext() {
     if (isLastStep) {
@@ -156,23 +179,8 @@ export function TutorialModal({
     onClose();
   }
 
-  // Show this prompt while the next feature is outside the viewport.
   if (!isTargetVisible) {
-    return (
-      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[9998] flex justify-center px-4">
-        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-sky-200 bg-white px-4 py-2 text-sm text-gray-700 shadow-lg">
-          <span>Scroll to {step.title}</span>
-
-          <button
-            type="button"
-            className="font-semibold text-sky-600"
-            onClick={handleSkip}
-          >
-            End tutorial
-          </button>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -188,28 +196,24 @@ export function TutorialModal({
       }
       className={
         step.target
-          ? "fixed z-[9998] w-[min(340px,calc(100vw-2rem))]"
-          : "fixed left-1/2 top-20 z-[9998] w-[min(420px,calc(100vw-2rem))] -translate-x-1/2"
+          ? "fixed z-[9998] w-[min(300px,calc(100vw-1.5rem))]"
+          : "fixed left-1/2 top-20 z-[9998] w-[min(340px,calc(100vw-1.5rem))] -translate-x-1/2"
       }
     >
       <div
         role="dialog"
         aria-labelledby={titleId}
-        className="w-full rounded-2xl border border-sky-200 bg-white p-5 shadow-2xl"
+        className="w-full rounded-xl border border-slate-200/80 bg-white/50 p-4 shadow-xl shadow-slate-900/10 backdrop-blur-md"
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-3xl">
-              {step.emoji ?? "✨"}
-            </div>
-
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-sky-500">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
               Step {currentStep + 1} of {steps.length}
             </p>
 
             <h2
               id={titleId}
-              className="mt-2 text-xl font-bold text-gray-950"
+              className="mt-1 text-base font-semibold text-slate-950"
             >
               {step.title}
             </h2>
@@ -217,31 +221,31 @@ export function TutorialModal({
 
           <button
             type="button"
-            className="rounded-full px-3 py-1 text-sm text-gray-500 hover:bg-gray-100"
+            className="rounded-full px-2 py-1 text-xs text-slate-500 hover:bg-white/60"
             onClick={handleSkip}
           >
             Skip
           </button>
         </div>
 
-        <p className="mt-3 leading-6 text-gray-600">
+        <p className="mt-2 text-sm leading-5 text-slate-700">
           {step.description}
         </p>
 
-        <div className="mt-6 h-2 rounded-full bg-gray-100">
+        <div className="mt-4 h-1 rounded-full bg-white/70">
           <div
-            className="h-2 rounded-full bg-sky-400 transition-all"
+            className="h-1 rounded-full bg-slate-500 transition-all"
             style={{
               width: `${((currentStep + 1) / steps.length) * 100}%`,
             }}
           />
         </div>
 
-        <div className="mt-6 flex items-center justify-between">
+        <div className="mt-4 flex items-center justify-between">
           <button
             type="button"
             disabled={isFirstStep}
-            className="rounded-xl border px-4 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-slate-200/80 bg-white/40 px-3 py-1.5 text-xs text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={handleBack}
           >
             Back
@@ -249,7 +253,7 @@ export function TutorialModal({
 
           <button
             type="button"
-            className="rounded-xl bg-sky-500 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-600"
+            className="rounded-lg bg-slate-900/90 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
             onClick={handleNext}
           >
             {isLastStep ? "Finish" : "Next"}

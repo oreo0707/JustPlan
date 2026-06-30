@@ -1,6 +1,6 @@
 "use client";
 
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Highlight from "@tiptap/extension-highlight";
@@ -12,7 +12,7 @@ import {
 } from "@tiptap/extension-text-style";
 import Image from "@tiptap/extension-image";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type RichNoteEditorProps = {
@@ -26,7 +26,16 @@ type RichNoteEditorProps = {
   onSharedColorChange?: (color: string) => void;
   toolbarControls?: ReactNode;
   onContentHeightChange?: (height: number) => void;
+  pageHeight?: number;
 };
+
+type ToolbarSelectionStyle = {
+  color: string;
+  fontFamily: string;
+  fontSize: string;
+};
+
+const MIXED_STYLE_VALUE = "__mixed__";
 
 export const NOTE_FONT_FAMILIES = [
   "Arial",
@@ -50,9 +59,23 @@ export function RichNoteEditor({
   onSharedColorChange,
   toolbarControls,
   onContentHeightChange,
+  pageHeight = 1123,
 }: RichNoteEditorProps) {
   const [fallbackColor, setFallbackColor] = useState(sharedColor);
-  const activeColor = sharedColor ?? fallbackColor;
+  const [toolbarSelectionStyle, setToolbarSelectionStyle] =
+    useState<ToolbarSelectionStyle>({
+      color: sharedColor,
+      fontFamily: defaultFontFamily,
+      fontSize: `${defaultFontSize}px`,
+    });
+  const [highlightColor, setHighlightColor] = useState("#fef08a");
+  const lastPickerTextColorRef = useRef<{
+    color: string;
+    from: number;
+    to: number;
+    appliedAt: number;
+  } | null>(null);
+  const activeColor = toolbarSelectionStyle.color ?? sharedColor ?? fallbackColor;
   const editorTextClass =
     theme === "dark" ? "text-[#f8fafc] caret-[#f8fafc]" : "text-[#111827]";
   const isDark = theme === "dark";
@@ -68,7 +91,111 @@ export function RichNoteEditor({
 
   function updateSharedColor(color: string) {
     setFallbackColor(color);
+    setToolbarSelectionStyle((current) => ({ ...current, color }));
     onSharedColorChange?.(color);
+  }
+
+  function getSelectionTextStyle(editorInstance: Editor) {
+    const colors = new Set<string>();
+    const fontFamilies = new Set<string>();
+    const fontSizes = new Set<string>();
+    const defaultColor = sharedColor ?? fallbackColor;
+    const defaultSize = `${defaultFontSize}px`;
+
+    function addTextStyle(attrs: Record<string, unknown>) {
+      colors.add(
+        typeof attrs.color === "string" && attrs.color
+          ? attrs.color
+          : defaultColor
+      );
+      fontFamilies.add(
+        typeof attrs.fontFamily === "string" && attrs.fontFamily
+          ? attrs.fontFamily
+          : defaultFontFamily
+      );
+      fontSizes.add(
+        typeof attrs.fontSize === "string" && attrs.fontSize
+          ? attrs.fontSize
+          : defaultSize
+      );
+    }
+
+    const { from, to, empty } = editorInstance.state.selection;
+
+    if (empty) {
+      addTextStyle(editorInstance.getAttributes("textStyle"));
+    } else {
+      editorInstance.state.doc.nodesBetween(from, to, (node) => {
+        if (!node.isText || node.textContent.length === 0) return;
+
+        const textStyleMark = node.marks.find(
+          (mark) => mark.type.name === "textStyle"
+        );
+        addTextStyle(textStyleMark?.attrs ?? {});
+      });
+    }
+
+    if (colors.size === 0) colors.add(defaultColor);
+    if (fontFamilies.size === 0) fontFamilies.add(defaultFontFamily);
+    if (fontSizes.size === 0) fontSizes.add(defaultSize);
+
+    return {
+      color: Array.from(colors)[0] ?? defaultColor,
+      fontFamily:
+        fontFamilies.size === 1
+          ? Array.from(fontFamilies)[0]
+          : MIXED_STYLE_VALUE,
+      fontSize:
+        fontSizes.size === 1 ? Array.from(fontSizes)[0] : MIXED_STYLE_VALUE,
+    };
+  }
+
+  function refreshToolbarSelectionStyle(editorInstance: Editor) {
+    const nextStyle = getSelectionTextStyle(editorInstance);
+
+    setToolbarSelectionStyle((current) =>
+      current.color === nextStyle.color &&
+      current.fontFamily === nextStyle.fontFamily &&
+      current.fontSize === nextStyle.fontSize
+        ? current
+        : nextStyle
+    );
+  }
+
+  function applySharedTextColor(color: string, eventTime: number) {
+    updateSharedColor(color);
+    if (!editor) return;
+
+    const { from, to, empty } = editor.state.selection;
+    editor.chain().focus().setColor(color).run();
+    setToolbarSelectionStyle((current) => ({ ...current, color }));
+    lastPickerTextColorRef.current = empty
+      ? null
+      : { color, from, to, appliedAt: eventTime };
+  }
+
+  function applySharedHighlight(eventTime: number) {
+    const { from, to, empty } = activeEditor.state.selection;
+    const lastPickerTextColor = lastPickerTextColorRef.current;
+    const shouldUndoPickerTextColor =
+      !empty &&
+      lastPickerTextColor?.color === highlightColor &&
+      lastPickerTextColor.from === from &&
+      lastPickerTextColor.to === to &&
+      eventTime - lastPickerTextColor.appliedAt < 8000;
+
+    if (shouldUndoPickerTextColor) {
+      activeEditor
+        .chain()
+        .focus()
+        .unsetColor()
+        .toggleHighlight({ color: highlightColor })
+        .run();
+      lastPickerTextColorRef.current = null;
+      return;
+    }
+
+    activeEditor.chain().focus().toggleHighlight({ color: highlightColor }).run();
   }
 
   const editor = useEditor({
@@ -88,12 +215,47 @@ export function RichNoteEditor({
     content,
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
+      refreshToolbarSelectionStyle(editor);
     },
     editorProps: {
       attributes: {
         class:
           `min-h-[calc(100vh-260px)] w-full bg-transparent p-0 ${editorTextClass} outline-none leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:py-0 [&_p]:leading-[32px] [&_li]:min-h-8 [&_li]:py-0 [&_li]:leading-[32px] [&_span]:align-baseline [&_span]:leading-none [&_mark]:align-baseline [&_mark]:leading-none [&_strong]:leading-none [&_u]:leading-none`,
         style: `font-family: ${defaultFontFamily}; font-size: ${defaultFontSize}px;`,
+      },
+      handleKeyDown: (_view, event) => {
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key === "Enter"
+        ) {
+          event.preventDefault();
+
+          const lineHeight = 32;
+          const selectionEnd = _view.state.selection.to;
+          const editorBounds = _view.dom.getBoundingClientRect();
+          let caretY = 0;
+
+          try {
+            caretY = _view.coordsAtPos(selectionEnd).top - editorBounds.top;
+          } catch {
+            caretY = _view.dom.scrollHeight;
+          }
+
+          const nextPageTop =
+            (Math.floor(Math.max(0, caretY) / pageHeight) + 1) * pageHeight;
+          const linesToInsert = Math.max(
+            1,
+            Math.ceil((nextPageTop - caretY + 1) / lineHeight)
+          );
+          const blankParagraphs = Array.from({ length: linesToInsert }, () => ({
+            type: "paragraph",
+          }));
+
+          editor?.chain().focus().insertContent(blankParagraphs).run();
+          return true;
+        }
+
+        return false;
       },
     },
   });
@@ -114,6 +276,23 @@ export function RichNoteEditor({
 
     return () => resizeObserver.disconnect();
   }, [editor, onContentHeightChange]);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const refresh = () => refreshToolbarSelectionStyle(editor);
+
+    refresh();
+    editor.on("selectionUpdate", refresh);
+    editor.on("transaction", refresh);
+    editor.on("focus", refresh);
+
+    return () => {
+      editor.off("selectionUpdate", refresh);
+      editor.off("transaction", refresh);
+      editor.off("focus", refresh);
+    };
+  });
 
   if (!editor) {
     return (
@@ -151,30 +330,44 @@ export function RichNoteEditor({
       <button
         type="button"
         className={toolbarButtonClass}
-        onClick={() =>
-          activeEditor
-            .chain()
-            .focus()
-            .toggleHighlight({ color: activeColor })
-            .run()
-        }
+        onClick={(event) => applySharedHighlight(event.timeStamp)}
       >
         Highlight
       </button>
+
+      <input
+        type="color"
+        title="Highlight colour"
+        value={highlightColor}
+        onChange={(event) => setHighlightColor(event.target.value)}
+        className={
+          isDark
+            ? "h-8 w-10 rounded border border-slate-600 bg-slate-800"
+            : "h-8 w-10 rounded border"
+        }
+      />
 
       {toolbarControls}
 
       <select
         className={toolbarSelectClass}
-        defaultValue=""
-        onChange={(event) =>
+        value={toolbarSelectionStyle.fontFamily}
+        onChange={(event) => {
+          if (event.target.value === MIXED_STYLE_VALUE) return;
           activeEditor
             .chain()
             .focus()
             .setFontFamily(event.target.value)
-            .run()
-        }
+            .run();
+          setToolbarSelectionStyle((current) => ({
+            ...current,
+            fontFamily: event.target.value,
+          }));
+        }}
       >
+        <option value={MIXED_STYLE_VALUE} disabled>
+          -
+        </option>
         <option value="" disabled>
           Font
         </option>
@@ -187,11 +380,19 @@ export function RichNoteEditor({
 
       <select
         className={toolbarSelectClass}
-        defaultValue=""
-        onChange={(event) =>
-          activeEditor.chain().focus().setFontSize(event.target.value).run()
-        }
+        value={toolbarSelectionStyle.fontSize}
+        onChange={(event) => {
+          if (event.target.value === MIXED_STYLE_VALUE) return;
+          activeEditor.chain().focus().setFontSize(event.target.value).run();
+          setToolbarSelectionStyle((current) => ({
+            ...current,
+            fontSize: event.target.value,
+          }));
+        }}
       >
+        <option value={MIXED_STYLE_VALUE} disabled>
+          -
+        </option>
         <option value="" disabled>
           Size
         </option>
@@ -206,7 +407,9 @@ export function RichNoteEditor({
         type="color"
         title="Colour"
         value={activeColor}
-        onChange={(event) => updateSharedColor(event.target.value)}
+        onChange={(event) =>
+          applySharedTextColor(event.target.value, event.timeStamp)
+        }
         className={
           isDark
             ? "h-8 w-10 rounded border border-slate-600 bg-slate-800"

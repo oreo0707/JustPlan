@@ -21,178 +21,171 @@ export type TutorialDefinition = {
 
 export const homeTutorialSteps: TutorialStep[] = [
   {
-    emoji: "😊",
-    title: "Welcome to Just Note!",
-    description: "Thank you for trying out Just Note. Let's give you a tour to familiarize yourself with the environment.",
+    title: "Welcome to Just Note",
+    description:
+      "Here is a quick tour of the main study tools. Each tip appears near the feature it explains.",
   },
   {
-    emoji: "🏠",
-    title: "Welcome to your Home Dashboard",
+    title: "Home overview",
     description:
-      "This is your main study overview. You can quickly see your schedule, today’s tasks, and deadlines that are coming soon.",
+      "Home gives you a quick view of your study plan: schedule, today’s work, and nearby deadlines.",
     target: '[data-tutorial="home-overview"]',
   },
   {
-    emoji: "📅",
-    title: "Schedule Panel",
+    title: "Weekly and monthly schedule",
     description:
-      "The schedule shows tasks planned for each day. Tasks can be planned for one specific day or across a range of days.",
+      "Tasks appear here when they have planned dates. Switch views to see your workload by week or month.",
     target: '[data-tutorial="home-schedule"]',
   },
   {
-    emoji: "✅",
-    title: "Today’s Tasks",
+    title: "Today’s tasks",
     description:
-      "This panel shows what you should work on today, including tasks planned specifically for today and ongoing tasks from a date range.",
+      "This shows tasks planned for today, including date-range tasks that include the current day.",
     target: '[data-tutorial="home-tasks"]',
   },
   {
-    emoji: "⏰",
-    title: "Due Soon",
+    title: "Due soon",
     description:
-      "This panel focuses on deadlines. It helps you notice tasks that are urgent or need attention soon.",
+      "Use this panel to spot tasks with upcoming due dates before they become urgent.",
     target: '[data-tutorial="home-due-soon"]',
   },
 ];
 
 export const subjectsTutorialSteps: TutorialStep[] = [
   {
-    emoji: "📚",
     title: "Subjects",
     description:
-      "Subjects help you organise your study materials. You can create subjects such as Math, Cybersecurity, English, or any module you are taking.",
+      "Subjects keep your modules separated, so each one can have its own tasks and notes.",
   },
   {
-    emoji: "➕",
-    title: "Add a Subject",
-    description:
-      "Use the add subject button to create a new study area. Each subject can have its own tasks and notes.",
+    title: "Add subjects",
+    description: "Create a subject for each class, module, or topic you study.",
+    target: '[data-tutorial="subjects-add"]',
   },
   {
-    emoji: "🗂️",
-    title: "Subject Cards",
+    title: "Subject cards",
     description:
-      "Click a subject card to open it. You will be able to manage tasks and notes inside that subject.",
+      "Open a subject card to manage its tasks and notes in one place.",
+    target: '[data-tutorial="subjects-list"]',
   },
 ];
 
 export const subjectDetailTutorialSteps: TutorialStep[] = [
   {
-    emoji: "📝",
-    title: "Subject Workspace",
+    title: "Subject workspace",
     description:
-      "This screen lets you manage everything inside one subject, including tasks and notes.",
+      "This page is the workspace for one subject: tasks, deadlines, and notes.",
+    target: '[data-tutorial="subject-header"]',
   },
   {
-    emoji: "✅",
-    title: "Tasks",
+    title: "Add tasks",
     description:
-      "You can add tasks, set a planned date or date range, add a due date, and mark tasks as completed when done.",
+      "Add tasks with a due date and a planned completion date. Planned dates decide where tasks appear in your schedule.",
+    target: '[data-tutorial="subject-tasks"]',
   },
   {
-    emoji: "📌",
-    title: "Planned Date vs Due Date",
+    title: "Plan date vs due date",
     description:
-      "Planned date means when you want to work on the task. Due date means the actual deadline.",
+      "Planned date is when you want to work. Due date is the real deadline.",
+    target: '[data-tutorial="subject-task-dates"]',
   },
   {
-    emoji: "📖",
-    title: "Notes",
+    title: "Add notes",
     description:
-      "Create notes for this subject. Each note can use templates, rich text, stickers, shapes, and text boxes.",
+      "Create notes for typing or free writing. The note editor supports text, drawing, templates, stickers, shapes, and images.",
+    target: '[data-tutorial="subject-notes"]',
+  },
+  {
+    title: "Import study materials",
+    description:
+      "Use the Notes menu to import a PDF or Word document. Each imported file becomes its own note card for viewing.",
+    target: '[data-tutorial="subject-import-material"]',
   },
 ];
 
 export const noteEditorTutorialSteps: TutorialStep[] = [
   {
-    emoji: "✍️",
-    title: "Note Editor",
+    title: "Note editor",
     description:
-      "This is where you write and design your notes. You can type normally or add movable objects like stickers and text boxes.",
+      "This is where you type, write, draw, and arrange note objects freely.",
   },
   {
-    emoji: "🎨",
-    title: "Text Tools",
+    title: "Text and drawing tools",
     description:
-      "Use the toolbar to change font, size, colour, highlight text, underline, bold, or insert images.",
+      "Use the toolbar for typing, drawing, highlighting, erasing, and adding objects.",
   },
   {
-    emoji: "📄",
-    title: "Note Templates",
+    title: "Templates and pages",
     description:
-      "Choose between plain, lined, grid, or dotted paper templates to match your note-taking style.",
+      "Choose plain, lined, grid, or dotted paper and move through note pages from the page panel.",
   },
   {
-    emoji: "🌟",
-    title: "Stickers and Shapes",
+    title: "Movable objects",
     description:
-      "Add stickers, shapes, and lines to decorate or organise your notes. You can drag, resize, flip, and recolour them.",
-  },
-  {
-    emoji: "🔤",
-    title: "Movable Text Boxes",
-    description:
-      "Text boxes are useful for labels, headers, mind map words, or decorative notes that you want to move freely.",
+      "Add stickers, images, text boxes, shapes, and lines. Select them to move, resize, duplicate, or delete.",
   },
 ];
 
 export const statsTutorialSteps: TutorialStep[] = [
   {
-    emoji: "📊",
     title: "Statistics",
     description:
-      "The statistics screen helps you understand your study workload, progress, and upcoming deadlines.",
+      "Stats summarizes your task plan so you can see workload, progress, and deadline pressure.",
   },
   {
-    emoji: "📚",
-    title: "Study Load by Subject",
+    title: "Three study views",
     description:
-      "This shows how many tasks are planned for each subject during the selected week or month.",
+      "Choose Subject Workload, Planned Task Progress, or Deadline Urgency Breakdown from these tabs.",
+    target: '[data-tutorial="stats-tabs"]',
   },
   {
-    emoji: "⏳",
-    title: "Planned Task Progress",
+    title: "Current statistic",
     description:
-      "This compares completed and pending tasks based on your planned study schedule.",
+      "Each view focuses on one question: how much work exists, how much is done, or which deadlines need attention.",
+    target: '[data-tutorial="stats-panel"]',
   },
   {
-    emoji: "⏰",
-    title: "Deadline Urgency",
+    title: "AI study coach",
     description:
-      "This shows overdue tasks, tasks due today, and upcoming deadlines so you can prioritise better.",
-  },
-  {
-    emoji: "🤖",
-    title: "AI Study Coach",
-    description:
-      "The AI Study Coach gives suggestions based on the statistic feature you are currently viewing.",
+      "Generate a suggestion based on the statistic you are viewing, so the advice matches your current progress and deadlines.",
+    target: '[data-tutorial="stats-ai"]',
   },
 ];
 
 export const settingsTutorialSteps: TutorialStep[] = [
   {
-    emoji: "⚙️",
     title: "Settings",
     description:
-      "Settings allow you to customise the app based on your study style and visual preferences.",
+      "Settings lets you personalize how the app looks and how new notes start.",
   },
   {
-    emoji: "🎨",
-    title: "Appearance",
-    description:
-      "You can change the app theme and choose cute custom cursors such as hearts, stars, or Y2K arrows.",
+    title: "Cursors",
+    description: "Choose a cursor style that fits the feel you want.",
+    target: '[data-tutorial="settings-cursors"]',
   },
   {
-    emoji: "📝",
-    title: "Note Defaults",
+    title: "App colors",
     description:
-      "Choose your default font, font size, and note template so new notes start with your preferred style.",
+      "Customize the app color palette or save your own color template.",
+    target: '[data-tutorial="settings-colors"]',
   },
   {
-    emoji: "🔁",
-    title: "Replay Tutorial",
+    title: "Note preferences",
     description:
-      "You can replay the tutorial anytime if you want to learn the app features again.",
+      "Set your preferred font, font size, pencil, eraser, highlighter thickness, and paper template.",
+    target: '[data-tutorial="settings-note-defaults"]',
+  },
+  {
+    title: "Tutorial replay",
+    description:
+      "Replay this screen’s guide or restart all tutorials whenever you want a refresher.",
+    target: '[data-tutorial="settings-tutorial"]',
+  },
+  {
+    title: "Feedback",
+    description:
+      "Send anonymous feedback when something feels confusing, useful, or worth improving.",
+    target: '[data-tutorial="settings-feedback"]',
   },
 ];
 

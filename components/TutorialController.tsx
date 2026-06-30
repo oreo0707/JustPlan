@@ -82,7 +82,7 @@ export function TutorialController() {
         type="button"
         aria-label={`Open ${tutorial.label}`}
         title={tutorial.label}
-        className="fixed bottom-5 right-5 z-[9997] flex h-11 w-11 items-center justify-center rounded-full border border-pink-200 bg-white text-lg font-bold text-sky-600 shadow-lg transition hover:-translate-y-0.5 hover:bg-sky-50"
+        className="fixed bottom-5 right-5 z-[9997] flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-slate-50"
         onClick={() => setIsOpen(true)}
       >
         ?

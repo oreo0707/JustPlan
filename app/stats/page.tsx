@@ -374,6 +374,7 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
         </div>
 
         <nav
+          data-tutorial="stats-tabs"
           className="mt-8 flex flex-wrap gap-2 border-b border-violet-200 px-2"
           aria-label="Statistics views"
         >
@@ -403,7 +404,10 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
           })}
         </nav>
 
-        <div className="rounded-b-3xl rounded-tr-3xl border border-t-0 border-violet-200 bg-white p-6 shadow-sm md:p-8">
+        <div
+          className="rounded-b-3xl rounded-tr-3xl border border-t-0 border-violet-200 bg-white p-6 shadow-sm md:p-8"
+          data-tutorial="stats-panel"
+        >
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div>
               <h2 className="text-2xl font-bold text-gray-950">
@@ -865,7 +869,10 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
           )}
         </div>
 
-        <div className="mt-8 rounded-2xl border border-violet-100 bg-violet-50/70 p-5">
+        <div
+          className="mt-8 rounded-2xl border border-violet-100 bg-violet-50/70 p-5"
+          data-tutorial="stats-ai"
+        >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.16em] text-violet-600">

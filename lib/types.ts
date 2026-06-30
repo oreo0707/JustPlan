@@ -17,12 +17,34 @@ export type Task = {
 
 export type NoteTemplate = "plain" | "lined" | "grid" | "dots";
 
+export type NoteMaterialHighlight = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+};
+
+export type NoteMaterial = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  fileReference: string;
+  imported_at: string;
+  highlights: NoteMaterialHighlight[];
+};
+
 export type Note = {
   id: string;
   title: string;
   content: string;
   template: NoteTemplate;
   objects: NoteObject[];
+  materials?: NoteMaterial[];
+  page_bookmarks?: number[];
+  page_count?: number;
   created_at: string;
   updated_at: string;
   position: number;
@@ -59,6 +81,12 @@ export type NoteObject = {
   height: number;
   originalWidth?: number;
   originalHeight?: number;
+  crop?: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  };
 
   // Absolute second endpoint used by freely adjustable line objects.
   endX?: number;

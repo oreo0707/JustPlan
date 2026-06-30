@@ -15,11 +15,13 @@ import { loadData, saveData } from "@/lib/storage";
 import {
   updateNoteContent,
   updateNoteObjects,
+  updateNotePages,
   updateNoteTemplate,
 } from "@/lib/study-actions";
 import { PaperBackground } from "@/components/PaperBackground";
 import { RichNoteEditor } from "@/components/RichNoteEditor";
 import { NoteObjectLayer } from "@/components/NoteObjectLayer";
+import { StoredImage } from "@/components/StoredImage";
 import { storeImageDataUrl } from "@/lib/image-storage";
 
 export default function NoteEditorPage() {
@@ -38,6 +40,10 @@ export default function NoteEditorPage() {
   const [template, setTemplate] = useState<NoteTemplate>("plain");
   const [hasLoaded, setHasLoaded] = useState(false);
   const [objects, setObjects] = useState<NoteObject[]>([]);
+  const [manualPageCount, setManualPageCount] = useState(1);
+  const [pageBookmarks, setPageBookmarks] = useState<number[]>([]);
+  const [openPageMenuIndex, setOpenPageMenuIndex] = useState<number | null>(null);
+  const [hasPageClipboard, setHasPageClipboard] = useState(false);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
   const [selectionTool, setSelectionTool] = useState<"rectangle" | "lasso">(
@@ -66,12 +72,14 @@ export default function NoteEditorPage() {
   const [showNoteMenu, setShowNoteMenu] = useState(false);
   const [textContentHeight, setTextContentHeight] = useState(0);
   const [saveRequestId, setSaveRequestId] = useState(0);
+  const [isNoteSaved, setIsNoteSaved] = useState(false);
   const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
   const [drawingRedoRequestId, setDrawingRedoRequestId] = useState(0);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
   const pendingDrawingCountRef = useRef(0);
+  const skipNextObjectDirtyMarkRef = useRef(false);
   const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
   const undoStackRef = useRef<
     Array<{
@@ -82,6 +90,7 @@ export default function NoteEditorPage() {
   >([]);
   const pageWidth = 794;
   const pageHeight = 1123;
+  const PAGE_CLIPBOARD_KEY = "just-study-page-clipboard";
 
   const [cursorStyle, setCursorStyle] = useState<
     "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star"
@@ -105,6 +114,12 @@ export default function NoteEditorPage() {
       setContent(foundNote?.content ?? "");
       setTemplate(foundNote?.template ?? "plain");
       setObjects(foundNote?.objects ?? []);
+      setManualPageCount(foundNote?.page_count ?? 1);
+      setPageBookmarks(foundNote?.page_bookmarks ?? []);
+      setHasPageClipboard(
+        typeof window !== "undefined" &&
+          window.localStorage.getItem(PAGE_CLIPBOARD_KEY) !== null
+      );
       setCursorStyle(loadedData.settings.cursor_style);
       setDrawingStrokeWidth(loadedData.settings.default_pencil_thickness);
       setEraserStrokeWidth(loadedData.settings.default_eraser_thickness);
@@ -236,10 +251,12 @@ export default function NoteEditorPage() {
     );
 
     setData(updatedData);
+    setIsNoteSaved(false);
     setSelectedObjectIds([]);
   }
 
   function handleSaveNote() {
+    skipNextObjectDirtyMarkRef.current = pendingDrawingCountRef.current > 0;
     setSaveRequestId((current) => current + 1);
 
     const updatedData = updateNoteContent(
@@ -250,6 +267,7 @@ export default function NoteEditorPage() {
     );
 
     setData(updatedData);
+    setIsNoteSaved(true);
   }
 
   function handlePrintNote() {
@@ -272,6 +290,7 @@ export default function NoteEditorPage() {
   function handleChangeTemplate(newTemplate: NoteTemplate) {
   pushUndoSnapshot();
   setTemplate(newTemplate);
+  setIsNoteSaved(false);
 
   const updatedData = updateNoteTemplate(
     data,
@@ -287,6 +306,11 @@ export default function NoteEditorPage() {
   function handleChangeObjects(newObjects: NoteObject[]) {
     pushUndoSnapshot();
     setObjects(newObjects);
+    if (skipNextObjectDirtyMarkRef.current) {
+      skipNextObjectDirtyMarkRef.current = false;
+    } else {
+      setIsNoteSaved(false);
+    }
 
     const updatedData = updateNoteObjects(
       data,
@@ -296,6 +320,267 @@ export default function NoteEditorPage() {
     );
 
     setData(updatedData);
+  }
+
+  function cloneNoteObject(object: NoteObject, index: number): NoteObject {
+    return {
+      ...structuredClone(object),
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${object.id}-page-copy-${index}`,
+    };
+  }
+
+  function getObjectPageBounds(object: NoteObject) {
+    if (object.type === "line") {
+      const startY =
+        object.endX !== undefined && object.endY !== undefined
+          ? object.y
+          : object.y + object.height;
+      const endY = object.endY ?? object.y;
+
+      return {
+        top: Math.min(startY, endY),
+        bottom: Math.max(startY, endY),
+      };
+    }
+
+    return {
+      top: object.y,
+      bottom: object.y + object.height,
+    };
+  }
+
+  function isObjectOnPage(object: NoteObject, pageIndex: number) {
+    const pageTop = pageIndex * pageHeight;
+    const pageBottom = pageTop + pageHeight;
+    const bounds = getObjectPageBounds(object);
+
+    return bounds.top < pageBottom && bounds.bottom >= pageTop;
+  }
+
+  function moveObjectByPages(object: NoteObject, pageDelta: number) {
+    const yDelta = pageDelta * pageHeight;
+
+    if (object.type === "line") {
+      return {
+        ...object,
+        y: object.y + yDelta,
+        endY: (object.endY ?? object.y) + yDelta,
+      };
+    }
+
+    return {
+      ...object,
+      y: object.y + yDelta,
+    };
+  }
+
+  function normalizeObjectToPage(object: NoteObject, pageIndex: number) {
+    const pageTop = pageIndex * pageHeight;
+
+    if (object.type === "line") {
+      return {
+        ...object,
+        y: object.y - pageTop,
+        endY: (object.endY ?? object.y) - pageTop,
+      };
+    }
+
+    return {
+      ...object,
+      y: object.y - pageTop,
+    };
+  }
+
+  function placeObjectOnPage(object: NoteObject, pageIndex: number, index: number) {
+    const pageTop = pageIndex * pageHeight;
+    const clonedObject = cloneNoteObject(object, index);
+
+    if (clonedObject.type === "line") {
+      return {
+        ...clonedObject,
+        y: clonedObject.y + pageTop,
+        endY: (clonedObject.endY ?? clonedObject.y) + pageTop,
+      };
+    }
+
+    return {
+      ...clonedObject,
+      y: clonedObject.y + pageTop,
+    };
+  }
+
+  function savePageState(
+    nextObjects: NoteObject[],
+    nextPageCount = manualPageCount,
+    nextBookmarks = pageBookmarks
+  ) {
+    pushUndoSnapshot();
+    setObjects(nextObjects);
+    setManualPageCount(Math.max(1, nextPageCount));
+    setPageBookmarks(nextBookmarks);
+    setIsNoteSaved(false);
+
+    setData(
+      updateNotePages(data, subjectId, noteId, {
+        objects: nextObjects,
+        page_count: Math.max(1, nextPageCount),
+        page_bookmarks: nextBookmarks,
+      })
+    );
+  }
+
+  function getCopiedPageObjects(pageIndex: number) {
+    return objects
+      .filter((object) => isObjectOnPage(object, pageIndex))
+      .map((object) => normalizeObjectToPage(object, pageIndex));
+  }
+
+  function copyPageToClipboard(pageIndex: number) {
+    const pageObjects = getCopiedPageObjects(pageIndex);
+
+    window.localStorage.setItem(
+      PAGE_CLIPBOARD_KEY,
+      JSON.stringify({
+        objects: pageObjects,
+        copiedAt: new Date().toISOString(),
+      })
+    );
+    setHasPageClipboard(true);
+  }
+
+  function readPageClipboard() {
+    const rawClipboard = window.localStorage.getItem(PAGE_CLIPBOARD_KEY);
+    if (!rawClipboard) return null;
+
+    try {
+      const parsed = JSON.parse(rawClipboard) as { objects?: NoteObject[] };
+      return Array.isArray(parsed.objects) ? parsed.objects : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function addBlankPageBelow(pageIndex: number) {
+    const insertAfterY = (pageIndex + 1) * pageHeight;
+    const nextObjects = objects.map((object) =>
+      getObjectPageBounds(object).top >= insertAfterY
+        ? moveObjectByPages(object, 1)
+        : object
+    );
+    const nextBookmarks = pageBookmarks.map((bookmark) =>
+      bookmark > pageIndex ? bookmark + 1 : bookmark
+    );
+
+    savePageState(
+      nextObjects,
+      Math.max(pageCount + 1, manualPageCount + 1),
+      nextBookmarks
+    );
+    setOpenPageMenuIndex(null);
+  }
+
+  function clearPage(pageIndex: number) {
+    savePageState(
+      objects.filter((object) => !isObjectOnPage(object, pageIndex)),
+      manualPageCount
+    );
+    setOpenPageMenuIndex(null);
+  }
+
+  function deletePage(pageIndex: number) {
+    if (pageCount <= 1) {
+      clearPage(pageIndex);
+      return;
+    }
+
+    const pageTop = pageIndex * pageHeight;
+    const pageBottom = pageTop + pageHeight;
+    const nextObjects = objects
+      .filter((object) => !isObjectOnPage(object, pageIndex))
+      .map((object) =>
+        getObjectPageBounds(object).top >= pageBottom
+          ? moveObjectByPages(object, -1)
+          : object
+      );
+    const nextBookmarks = pageBookmarks
+      .filter((bookmark) => bookmark !== pageIndex)
+      .map((bookmark) => (bookmark > pageIndex ? bookmark - 1 : bookmark));
+
+    savePageState(nextObjects, Math.max(1, manualPageCount - 1), nextBookmarks);
+    setOpenPageMenuIndex(null);
+  }
+
+  function cutPage(pageIndex: number) {
+    copyPageToClipboard(pageIndex);
+    deletePage(pageIndex);
+  }
+
+  function pastePageBelow(pageIndex: number) {
+    const clipboardObjects = readPageClipboard();
+    if (!clipboardObjects) return;
+
+    const pastePageIndex = pageIndex + 1;
+    const insertY = pastePageIndex * pageHeight;
+    const shiftedObjects = objects.map((object) =>
+      getObjectPageBounds(object).top >= insertY
+        ? moveObjectByPages(object, 1)
+        : object
+    );
+    const pastedObjects = clipboardObjects.map((object, index) =>
+      placeObjectOnPage(object, pastePageIndex, index)
+    );
+    const nextBookmarks = pageBookmarks.map((bookmark) =>
+      bookmark >= pastePageIndex ? bookmark + 1 : bookmark
+    );
+
+    savePageState(
+      [...shiftedObjects, ...pastedObjects],
+      Math.max(pageCount + 1, manualPageCount + 1),
+      nextBookmarks
+    );
+    setOpenPageMenuIndex(null);
+  }
+
+  function duplicatePage(pageIndex: number) {
+    const pageObjects = getCopiedPageObjects(pageIndex);
+    const pastePageIndex = pageIndex + 1;
+    const insertY = pastePageIndex * pageHeight;
+    const shiftedObjects = objects.map((object) =>
+      getObjectPageBounds(object).top >= insertY
+        ? moveObjectByPages(object, 1)
+        : object
+    );
+    const duplicatedObjects = pageObjects.map((object, index) =>
+      placeObjectOnPage(object, pastePageIndex, index)
+    );
+    const nextBookmarks = pageBookmarks.map((bookmark) =>
+      bookmark >= pastePageIndex ? bookmark + 1 : bookmark
+    );
+
+    savePageState(
+      [...shiftedObjects, ...duplicatedObjects],
+      Math.max(pageCount + 1, manualPageCount + 1),
+      nextBookmarks
+    );
+    setOpenPageMenuIndex(null);
+  }
+
+  function togglePageBookmark(pageIndex: number) {
+    const nextBookmarks = pageBookmarks.includes(pageIndex)
+      ? pageBookmarks.filter((bookmark) => bookmark !== pageIndex)
+      : [...pageBookmarks, pageIndex].sort((a, b) => a - b);
+
+    setPageBookmarks(nextBookmarks);
+    setData(
+      updateNotePages(data, subjectId, noteId, {
+        page_bookmarks: nextBookmarks,
+        page_count: manualPageCount,
+        objects,
+      })
+    );
   }
 
   function undoLatestSavedDrawingStroke() {
@@ -379,6 +664,13 @@ export default function NoteEditorPage() {
 
   function handlePendingDrawingCountChange(count: number) {
     pendingDrawingCountRef.current = count;
+  }
+
+  function handleChangeContent(nextContent: string) {
+    setContent(nextContent);
+    if (nextContent !== content) {
+      setIsNoteSaved(false);
+    }
   }
 
   function getCurrentPageIndex() {
@@ -703,6 +995,79 @@ export default function NoteEditorPage() {
     setSelectedObjectIds([newImage.id]);
   }
 
+  function readImageFileAsDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error("Could not read image file."));
+      };
+      reader.onerror = () => reject(new Error("Could not read image file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function getFittedImageSize(src: string) {
+    return new Promise<{ width: number; height: number }>((resolve) => {
+      const imageElement = new window.Image();
+      imageElement.onload = () => {
+        const scale = Math.min(
+          320 / imageElement.naturalWidth,
+          240 / imageElement.naturalHeight,
+          1
+        );
+
+        resolve({
+          width: imageElement.naturalWidth * scale,
+          height: imageElement.naturalHeight * scale,
+        });
+      };
+      imageElement.onerror = () => resolve({ width: 320, height: 200 });
+      imageElement.src = src;
+    });
+  }
+
+  async function addImageFileToNote(file: File) {
+    const src = await readImageFileAsDataUrl(file);
+    const size = await getFittedImageSize(src);
+    await addImageObject(src, size.width, size.height);
+  }
+
+  useEffect(() => {
+    function handlePaste(event: ClipboardEvent) {
+      const clipboardData = event.clipboardData;
+      const imageFile =
+        Array.from(clipboardData?.files ?? []).find((file) =>
+          file.type.startsWith("image/")
+        ) ??
+        Array.from(clipboardData?.items ?? [])
+          .find((item) => item.type.startsWith("image/"))
+          ?.getAsFile();
+
+      if (!imageFile) return;
+
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        target?.isContentEditable ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT";
+
+      if (isEditableTarget && target?.tagName !== "DIV") return;
+
+      event.preventDefault();
+      void addImageFileToNote(imageFile);
+    }
+
+    window.addEventListener("paste", handlePaste);
+
+    return () => window.removeEventListener("paste", handlePaste);
+  });
+
   function addShape(
     type: "rectangle" | "circle" | "triangle" | "line"
   ) {
@@ -801,8 +1166,9 @@ function addTextBox() {
   const hasTypedContent = contentTextOnly.length > 0;
   const typedContentBottom = hasTypedContent ? textContentHeight + 32 : 0;
   const usedBottom = Math.max(objectExtents.bottom, typedContentBottom);
-  const pageCount =
+  const automaticPageCount =
     usedBottom > 0 ? Math.max(2, Math.ceil(usedBottom / pageHeight) + 1) : 1;
+  const pageCount = Math.max(manualPageCount, automaticPageCount);
   const canvasPixelHeight = pageCount * pageHeight;
   const canvasMinimumHeight = `${canvasPixelHeight}px`;
   const canvasWidth = `${pageWidth}px`;
@@ -1255,8 +1621,8 @@ function addTextBox() {
     ? "h-screen overflow-auto bg-slate-950 text-slate-100"
     : "h-screen overflow-auto bg-gray-50";
   const noteHeaderClass = isDarkNoteTheme
-    ? "no-print flex items-center justify-between border-b border-slate-800 bg-slate-950 px-16 py-3 text-slate-100"
-    : "no-print flex items-center justify-between border-b bg-white px-16 py-3";
+    ? "no-print flex min-h-20 items-start border-b border-slate-800 bg-slate-950 px-16 pt-3 text-slate-100"
+    : "no-print flex min-h-20 items-start border-b bg-white px-16 pt-3";
   const noteTopButtonClass = isDarkNoteTheme
     ? "rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800"
     : "rounded-lg border px-3 py-2 text-sm";
@@ -1264,14 +1630,20 @@ function addTextBox() {
     ? "no-print fixed left-4 top-4 z-[60] rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-base leading-none text-slate-100 shadow-sm hover:bg-slate-800"
     : "no-print fixed left-4 top-4 z-[60] rounded-md border bg-white px-2.5 py-1 text-base leading-none shadow-sm";
   const notePanelClass = isDarkNoteTheme
-    ? "absolute right-0 top-17 z-50 w-52 rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
-    : "absolute right-0 top-17 z-50 w-52 rounded-xl border bg-white p-3 shadow-lg";
+    ? "absolute right-0 top-12 z-[10002] w-52 rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
+    : "absolute right-0 top-12 z-[10002] w-52 rounded-xl border bg-white p-3 shadow-lg";
   const noteSidePanelClass = isDarkNoteTheme
     ? "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-lg"
     : "no-print fixed right-4 top-20 z-50 max-h-[calc(100vh-6rem)] w-44 overflow-y-auto rounded-xl border bg-white p-3 shadow-lg";
   const noteSidePageButtonClass = isDarkNoteTheme
     ? "w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-left text-sm text-slate-100 hover:bg-slate-700"
     : "w-full rounded-lg border bg-gray-50 p-2 text-left text-sm hover:bg-gray-100";
+  const notePageActionMenuClass = isDarkNoteTheme
+    ? "absolute bottom-7 left-1 z-20 w-36 rounded-lg border border-slate-700 bg-slate-900 p-1 text-xs text-slate-100 shadow-lg"
+    : "absolute bottom-7 left-1 z-20 w-36 rounded-lg border bg-white p-1 text-xs shadow-lg";
+  const notePageActionButtonClass = isDarkNoteTheme
+    ? "block w-full rounded-md px-2 py-1 text-left hover:bg-slate-800"
+    : "block w-full rounded-md px-2 py-1 text-left hover:bg-gray-100";
   const activeDrawingThickness =
     drawingTool === "erase"
       ? eraserStrokeWidth
@@ -1612,6 +1984,7 @@ function addTextBox() {
   const thumbnailScale = 0.14;
   const thumbnailWidth = pageWidth * thumbnailScale;
   const thumbnailHeight = pageHeight * thumbnailScale;
+  const thumbnailBackgroundColor = isDarkNoteTheme ? "#111827" : "#ffffff";
   const thumbnailBackgroundClass = isDarkNoteTheme
     ? {
         plain: "border-slate-700 bg-[#111827]",
@@ -1634,14 +2007,33 @@ function addTextBox() {
 
   function renderPagePreview(pageIndex: number) {
     const pageTop = pageIndex * pageHeight;
-    const pageBottom = pageTop + pageHeight;
-    const pageObjects = objects.filter((object) => {
-      const objectBottom =
-        object.type === "line"
-          ? Math.max(object.y, object.endY ?? object.y + object.height)
-          : object.y + object.height;
+    const pageObjects = objects.filter((object) => isObjectOnPage(object, pageIndex));
+    const getImageCropStyle = (object: NoteObject) => {
+      const crop = object.crop ?? { left: 0, top: 0, right: 0, bottom: 0 };
+      const visibleWidth = Math.max(0.1, 1 - crop.left - crop.right);
+      const visibleHeight = Math.max(0.1, 1 - crop.top - crop.bottom);
 
-      return object.y < pageBottom && objectBottom >= pageTop;
+      return {
+        left: `${(-crop.left / visibleWidth) * 100}%`,
+        top: `${(-crop.top / visibleHeight) * 100}%`,
+        width: `${(1 / visibleWidth) * 100}%`,
+        height: `${(1 / visibleHeight) * 100}%`,
+      };
+    };
+    const getDrawingPath = (points: { x: number; y: number }[] = []) =>
+      points
+        .map((point, index) =>
+          index === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
+        )
+        .join(" ");
+    const getLinePoints = (object: NoteObject) => ({
+      startX: object.x,
+      startY:
+        object.endX !== undefined && object.endY !== undefined
+          ? object.y
+          : object.y + object.height,
+      endX: object.endX ?? object.x + object.width,
+      endY: object.endY ?? object.y,
     });
 
     return (
@@ -1650,60 +2042,159 @@ function addTextBox() {
         style={{
           width: thumbnailWidth,
           height: thumbnailHeight,
+          backgroundColor: thumbnailBackgroundColor,
         }}
       >
-        {pageIndex === 0 && hasTypedContent && (
+        {hasTypedContent && (
           <div
-            className="absolute left-0 top-0 origin-top-left p-4 text-[16px] leading-8 text-gray-500"
+            className="absolute left-0 origin-top-left p-4 text-[16px] leading-8 text-gray-500 [&_h1]:m-0 [&_h2]:m-0 [&_h3]:m-0 [&_li]:m-0 [&_li]:min-h-8 [&_li]:leading-[32px] [&_p]:m-0 [&_p]:min-h-8 [&_p]:leading-[32px]"
             style={{
-              width: 900,
-              height: pageHeight,
+              top: -(pageTop * thumbnailScale),
+              width: pageWidth,
+              minHeight: canvasPixelHeight,
               transform: `scale(${thumbnailScale})`,
+              transformOrigin: "top left",
             }}
             dangerouslySetInnerHTML={{ __html: content }}
           />
         )}
 
-        {pageObjects.map((object) => (
-          <div
-            key={object.id}
-            className="absolute overflow-hidden rounded-sm border border-gray-300/60 bg-white/70"
-            style={{
-              left: object.x * thumbnailScale,
-              top: (object.y - pageTop) * thumbnailScale,
-              width: Math.max(3, object.width * thumbnailScale),
-              height: Math.max(3, object.height * thumbnailScale),
-              backgroundColor:
-                object.type === "rectangle" && object.filled
-                  ? object.color
-                  : undefined,
-              borderColor: object.color,
-            }}
-          >
-            {object.type === "textbox" && (
-              <div
-                className="origin-top-left whitespace-pre-wrap text-gray-700"
-                style={{
-                  width: object.width,
-                  transform: `scale(${thumbnailScale})`,
-                  color: object.color,
-                  fontSize: object.fontSize,
-                  fontFamily: object.fontFamily,
-                }}
-              >
-                {object.text}
-              </div>
-            )}
+        {pageObjects.map((object) => {
+          if (object.type === "line") {
+            const points = getLinePoints(object);
 
-            {object.type === "sticker" && object.src && (
-              <img
-                src={object.src}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            )}
-          </div>
-        ))}
+            return (
+              <svg
+                key={object.id}
+                className="absolute inset-0 h-full w-full overflow-visible"
+              >
+                <line
+                  x1={points.startX * thumbnailScale}
+                  y1={(points.startY - pageTop) * thumbnailScale}
+                  x2={points.endX * thumbnailScale}
+                  y2={(points.endY - pageTop) * thumbnailScale}
+                  stroke={object.color ?? "#111827"}
+                  strokeWidth={Math.max(1, (object.strokeWidth ?? 5) * thumbnailScale)}
+                  strokeLinecap="round"
+                />
+              </svg>
+            );
+          }
+
+          return (
+            <div
+              key={object.id}
+              className="absolute overflow-hidden"
+              style={{
+                left: object.x * thumbnailScale,
+                top: (object.y - pageTop) * thumbnailScale,
+                width: Math.max(3, object.width * thumbnailScale),
+                height: Math.max(3, object.height * thumbnailScale),
+                transform: `scale(${object.flipX ? -1 : 1}, ${
+                  object.flipY ? -1 : 1
+                })`,
+              }}
+            >
+              {object.type === "textbox" && (
+                <div
+                  className="origin-top-left whitespace-pre-wrap"
+                  style={{
+                    width: object.width,
+                    transform: `scale(${thumbnailScale})`,
+                    transformOrigin: "top left",
+                    color: object.color ?? (isDarkNoteTheme ? "#f8fafc" : "#111827"),
+                    fontSize: object.fontSize,
+                    fontFamily: object.fontFamily,
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: object.html ?? object.text ?? "",
+                  }}
+                />
+              )}
+
+              {object.type === "sticker" && object.src && (
+                <img
+                  src={object.src}
+                  alt=""
+                  className="h-full w-full object-fill"
+                  draggable={false}
+                />
+              )}
+
+              {object.type === "image" && object.src && (
+                <div className="relative h-full w-full overflow-hidden">
+                  <StoredImage
+                    src={object.src}
+                    alt=""
+                    className="absolute object-fill"
+                    style={getImageCropStyle(object)}
+                  />
+                </div>
+              )}
+
+              {object.type === "drawing" && (
+                <svg
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${Math.max(1, object.width)} ${Math.max(1, object.height)}`}
+                  preserveAspectRatio="none"
+                  className="overflow-visible"
+                >
+                  <path
+                    d={getDrawingPath(object.points)}
+                    fill="none"
+                    stroke={object.color ?? "#111827"}
+                    strokeOpacity={object.drawingTool === "highlight" ? 0.45 : 1}
+                    strokeWidth={object.strokeWidth ?? 4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
+
+              {(object.type === "rectangle" ||
+                object.type === "circle" ||
+                object.type === "triangle") && (
+                <svg
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${Math.max(1, object.width)} ${Math.max(1, object.height)}`}
+                  preserveAspectRatio="none"
+                >
+                  {object.type === "circle" ? (
+                    <ellipse
+                      cx={object.width / 2}
+                      cy={object.height / 2}
+                      rx={object.width / 2}
+                      ry={object.height / 2}
+                      fill={object.filled ? object.color ?? "#111827" : "transparent"}
+                      stroke={object.color ?? "#111827"}
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ) : (
+                    <polygon
+                      points={
+                        object.vertices?.length
+                          ? object.vertices
+                              .map((vertex) => `${vertex.x},${vertex.y}`)
+                              .join(" ")
+                          : object.type === "triangle"
+                            ? `${object.width / 2},0 ${object.width},${object.height} 0,${object.height}`
+                            : `0,0 ${object.width},0 ${object.width},${object.height} 0,${object.height}`
+                      }
+                      fill={object.filled ? object.color ?? "#111827" : "transparent"}
+                      stroke={object.color ?? "#111827"}
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                </svg>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1723,7 +2214,7 @@ function addTextBox() {
           {note.title}
         </h1>
 
-        <div className="flex items-center gap-2">
+        <div className="no-print fixed right-6 top-4 z-[10001] flex items-center gap-2">
           <button
             type="button"
             className={noteTopButtonClass}
@@ -1831,7 +2322,7 @@ function addTextBox() {
             className="rounded-lg bg-black px-4 py-2 text-white"
             onClick={handleSaveNote}
           >
-            Save Note
+            {isNoteSaved ? "Saved" : "Save Note"}
           </button>
         </div>
       </header>
@@ -1841,17 +2332,125 @@ function addTextBox() {
           <p className={isDarkNoteTheme ? "mb-2 text-xs font-semibold text-slate-400" : "mb-2 text-xs font-semibold text-gray-500"}>Pages</p>
           <div className="space-y-2">
             {Array.from({ length: pageCount }, (_, index) => (
-              <button
+              <div
                 key={index}
-                type="button"
-                className={noteSidePageButtonClass}
-                onClick={() => scrollToPage(index)}
+                className="relative"
               >
-                <span className={isDarkNoteTheme ? "mb-1 block text-xs font-semibold text-slate-300" : "mb-1 block text-xs font-semibold text-gray-600"}>
-                  Page {index + 1}
-                </span>
-                {renderPagePreview(index)}
-              </button>
+                <button
+                  type="button"
+                  className={noteSidePageButtonClass}
+                  onClick={() => scrollToPage(index)}
+                >
+                  <span className={isDarkNoteTheme ? "mb-1 block text-xs font-semibold text-slate-300" : "mb-1 block text-xs font-semibold text-gray-600"}>
+                    Page {index + 1}
+                  </span>
+                  {renderPagePreview(index)}
+                </button>
+
+                <button
+                  type="button"
+                  className={
+                    pageBookmarks.includes(index)
+                      ? "absolute right-1 top-1 z-10 rounded-full bg-yellow-300 px-1.5 py-0.5 text-xs text-yellow-900 shadow"
+                      : isDarkNoteTheme
+                        ? "absolute right-1 top-1 z-10 rounded-full bg-slate-900/90 px-1.5 py-0.5 text-xs text-slate-200 shadow"
+                        : "absolute right-1 top-1 z-10 rounded-full bg-white/90 px-1.5 py-0.5 text-xs text-gray-500 shadow"
+                  }
+                  title={
+                    pageBookmarks.includes(index)
+                      ? "Remove bookmark"
+                      : "Bookmark page"
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    togglePageBookmark(index);
+                  }}
+                >
+                  ★
+                </button>
+
+                <button
+                  type="button"
+                  className={
+                    isDarkNoteTheme
+                      ? "absolute bottom-1 left-1 z-10 rounded-md bg-slate-900/90 px-2 py-0.5 text-xs text-slate-100 shadow"
+                      : "absolute bottom-1 left-1 z-10 rounded-md bg-white/90 px-2 py-0.5 text-xs text-gray-700 shadow"
+                  }
+                  title="Page actions"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setOpenPageMenuIndex((current) =>
+                      current === index ? null : index
+                    );
+                  }}
+                >
+                  ...
+                </button>
+
+                {openPageMenuIndex === index && (
+                  <div
+                    className={notePageActionMenuClass}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => addBlankPageBelow(index)}
+                    >
+                      Add blank page
+                    </button>
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => cutPage(index)}
+                    >
+                      Cut
+                    </button>
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => {
+                        copyPageToClipboard(index);
+                        setOpenPageMenuIndex(null);
+                      }}
+                    >
+                      Copy
+                    </button>
+                    {hasPageClipboard && (
+                      <button
+                        type="button"
+                        className={notePageActionButtonClass}
+                        onClick={() => pastePageBelow(index)}
+                      >
+                        Paste below
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => duplicatePage(index)}
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => clearPage(index)}
+                    >
+                      Clear page
+                    </button>
+                    <button
+                      type="button"
+                      className={notePageActionButtonClass}
+                      onClick={() => deletePage(index)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </aside>
@@ -2363,7 +2962,7 @@ function addTextBox() {
           >
             <RichNoteEditor
               content={content}
-              onChange={setContent}
+              onChange={handleChangeContent}
               minimumHeight={canvasMinimumHeight}
               defaultFontFamily={data.settings.default_font_family}
               defaultFontSize={data.settings.default_font_size}
@@ -2372,6 +2971,7 @@ function addTextBox() {
               onSharedColorChange={setShapeColor}
               toolbarControls={noteObjectToolbarControls}
               onContentHeightChange={setTextContentHeight}
+              pageHeight={pageHeight}
             />
           </PaperBackground>
 

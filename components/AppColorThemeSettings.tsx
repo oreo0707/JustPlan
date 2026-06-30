@@ -60,7 +60,7 @@ const presets: Array<{ label: string; colors: AppColors }> = [
     colors: {
       app_background_color: "#efe6e6",
       app_surface_color: "#d4e8f7",
-      app_accent_color: "#f9f3e6",
+      app_accent_color: "#b8a8a9",
       app_text_color: "#b2909d",
     },
   },

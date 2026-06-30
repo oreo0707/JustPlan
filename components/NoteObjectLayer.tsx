@@ -428,6 +428,7 @@ export function NoteObjectLayer({
     useState<DrawingPoint | null>(null);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
   const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
+  const [cropImageId, setCropImageId] = useState<string | null>(null);
   const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
   const isDark = theme === "dark";
   const objectControlPanelClass = isDark
@@ -476,6 +477,35 @@ export function NoteObjectLayer({
     return {
       width: Math.min(Math.max(1, width), Math.max(1, pageWidth - object.x)),
       height: Math.min(Math.max(1, height), Math.max(1, drawingHeight - object.y)),
+    };
+  }
+
+  function getImageCrop(object: NoteObject) {
+    return {
+      left: object.crop?.left ?? 0,
+      top: object.crop?.top ?? 0,
+      right: object.crop?.right ?? 0,
+      bottom: object.crop?.bottom ?? 0,
+    };
+  }
+
+  function clampCropSide(
+    value: number,
+    oppositeSide: number
+  ) {
+    return clampValue(value, 0, Math.max(0, 0.9 - oppositeSide));
+  }
+
+  function getCroppedImageStyle(object: NoteObject) {
+    const crop = getImageCrop(object);
+    const visibleWidth = Math.max(0.1, 1 - crop.left - crop.right);
+    const visibleHeight = Math.max(0.1, 1 - crop.top - crop.bottom);
+
+    return {
+      left: `${(-crop.left / visibleWidth) * 100}%`,
+      top: `${(-crop.top / visibleHeight) * 100}%`,
+      width: `${(1 / visibleWidth) * 100}%`,
+      height: `${(1 / visibleHeight) * 100}%`,
     };
   }
 
@@ -1330,10 +1360,37 @@ export function NoteObjectLayer({
       (object) =>
         selectedObjectIds.includes(object.id) && canDuplicateObject(object)
     );
+    const selectedImage =
+      selectedObjectIds.length === 1
+        ? objects.find(
+            (object) =>
+              object.id === selectedObjectIds[0] && object.type === "image"
+          )
+        : undefined;
 
     return (
       <div className={objectControlPanelClass}>
         {renderMoveActionButton()}
+        {selectedImage && (
+          <button
+            type="button"
+            className={`${objectControlButtonClass} text-left`}
+            title="Crop image"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setCropImageId((current) =>
+                current === selectedImage.id ? null : selectedImage.id
+              );
+            }}
+          >
+            Crop
+          </button>
+        )}
         {canDuplicateSelection && (
           <button
             type="button"
@@ -1615,6 +1672,147 @@ export function NoteObjectLayer({
         Math.max(30, originalWidth + dx),
         Math.max(30, originalHeight + dy)
       );
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function startGroupResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (!selectedGroupBounds) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    const originalBounds = selectedGroupBounds;
+    const selectedIds = new Set(selectedObjectIds);
+    const originalObjects = new Map(
+      objects
+        .filter((object) => selectedIds.has(object.id))
+        .map((object) => [object.id, object])
+    );
+
+    function getScaledValue(value: number, origin: number, scale: number) {
+      return origin + (value - origin) * scale;
+    }
+
+    function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
+      const dx = moveEvent.clientX - pointerX;
+      const dy = moveEvent.clientY - pointerY;
+      const rawScale = Math.max(
+        0.2,
+        1 +
+          Math.max(
+            dx / Math.max(1, originalBounds.width),
+            dy / Math.max(1, originalBounds.height)
+          )
+      );
+      const maxScale = Math.max(
+        0.2,
+        Math.min(
+          pageWidth / Math.max(1, originalBounds.left + originalBounds.width),
+          drawingHeight /
+            Math.max(1, originalBounds.top + originalBounds.height)
+        )
+      );
+      const scale = Math.min(rawScale, maxScale);
+
+      onChangeObjects(
+        objects.map((object) => {
+          const original = originalObjects.get(object.id);
+          if (!original) return object;
+
+          if (original.type === "line") {
+            const points = getLinePoints(original);
+            return {
+              ...object,
+              x: getScaledValue(points.startX, originalBounds.left, scale),
+              y: getScaledValue(points.startY, originalBounds.top, scale),
+              endX: getScaledValue(points.endX, originalBounds.left, scale),
+              endY: getScaledValue(points.endY, originalBounds.top, scale),
+              strokeWidth: Math.max(
+                1,
+                (original.strokeWidth ?? 5) * Math.sqrt(scale)
+              ),
+            };
+          }
+
+          const nextWidth = Math.max(1, original.width * scale);
+          const nextHeight = Math.max(1, original.height * scale);
+
+          return {
+            ...object,
+            x: getScaledValue(original.x, originalBounds.left, scale),
+            y: getScaledValue(original.y, originalBounds.top, scale),
+            width: nextWidth,
+            height: nextHeight,
+            fontSize:
+              original.type === "textbox" && original.fontSize
+                ? Math.max(8, original.fontSize * Math.sqrt(scale))
+                : original.fontSize,
+            vertices: original.vertices?.map((vertex) => ({
+              x: vertex.x * scale,
+              y: vertex.y * scale,
+            })),
+          };
+        })
+      );
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function startImageCrop(
+    event: React.PointerEvent<HTMLDivElement>,
+    object: NoteObject,
+    side: "left" | "right" | "top" | "bottom"
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    const originalCrop = getImageCrop(object);
+
+    function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
+      const dx = (moveEvent.clientX - pointerX) / Math.max(1, object.width);
+      const dy = (moveEvent.clientY - pointerY) / Math.max(1, object.height);
+      const nextCrop = { ...originalCrop };
+
+      if (side === "left") {
+        nextCrop.left = clampCropSide(originalCrop.left + dx, originalCrop.right);
+      }
+
+      if (side === "right") {
+        nextCrop.right = clampCropSide(originalCrop.right - dx, originalCrop.left);
+      }
+
+      if (side === "top") {
+        nextCrop.top = clampCropSide(originalCrop.top + dy, originalCrop.bottom);
+      }
+
+      if (side === "bottom") {
+        nextCrop.bottom = clampCropSide(originalCrop.bottom - dy, originalCrop.top);
+      }
+
+      updateObject(object.id, { crop: nextCrop });
     }
 
     function handleUp() {
@@ -2918,11 +3116,14 @@ export function NoteObjectLayer({
             )}
 
             {object.type === "image" && object.src && (
-              <StoredImage
-                src={object.src}
-                alt="Uploaded image"
-                className="h-full w-full object-fill"
-              />
+              <div className="relative h-full w-full overflow-hidden">
+                <StoredImage
+                  src={object.src}
+                  alt="Uploaded image"
+                  className="absolute object-fill"
+                  style={getCroppedImageStyle(object)}
+                />
+              </div>
             )}
 
             {object.type === "rectangle" && (
@@ -3110,6 +3311,38 @@ export function NoteObjectLayer({
                     />
                   </>
                 )}
+                {object.type === "image" && cropImageId === object.id && (
+                  <>
+                    <div
+                      className={`absolute left-0 top-0 h-full w-3 -translate-x-1/2 touch-none cursor-ew-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900" : "bg-white"}`}
+                      title="Crop left"
+                      onPointerDown={(event) =>
+                        startImageCrop(event, object, "left")
+                      }
+                    />
+                    <div
+                      className={`absolute right-0 top-0 h-full w-3 translate-x-1/2 touch-none cursor-ew-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900" : "bg-white"}`}
+                      title="Crop right"
+                      onPointerDown={(event) =>
+                        startImageCrop(event, object, "right")
+                      }
+                    />
+                    <div
+                      className={`absolute left-0 top-0 h-3 w-full -translate-y-1/2 touch-none cursor-ns-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900" : "bg-white"}`}
+                      title="Crop top"
+                      onPointerDown={(event) =>
+                        startImageCrop(event, object, "top")
+                      }
+                    />
+                    <div
+                      className={`absolute bottom-0 left-0 h-3 w-full translate-y-1/2 touch-none cursor-ns-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900" : "bg-white"}`}
+                      title="Crop bottom"
+                      onPointerDown={(event) =>
+                        startImageCrop(event, object, "bottom")
+                      }
+                    />
+                  </>
+                )}
                 {isVertexShape(object) && shapeEditMode === "resize" && (
                   <div
                     className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
@@ -3136,35 +3369,57 @@ export function NoteObjectLayer({
       })}
 
       {selectedGroupBounds && (
-        <div
-          className={selectionActionPanelClass}
-          style={{
-            left: selectedGroupBounds.left,
-            top: selectedGroupBounds.top + selectedGroupBounds.height + 8,
-            zIndex: 80,
-          }}
-        >
-          {renderMoveActionButton()}
-          {canDuplicateGroupSelection &&
-            renderSelectionActionButton(
-              "Duplicate",
-              "Duplicate selected objects",
-              duplicateSelectedObjects
+        <>
+          <div
+            className="pointer-events-none absolute border-2 border-blue-600"
+            style={{
+              left: selectedGroupBounds.left,
+              top: selectedGroupBounds.top,
+              width: selectedGroupBounds.width,
+              height: selectedGroupBounds.height,
+              zIndex: 79,
+            }}
+          />
+          <div
+            className={`pointer-events-auto absolute h-5 w-5 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+            title="Scale selected objects"
+            style={{
+              left: selectedGroupBounds.left + selectedGroupBounds.width - 8,
+              top: selectedGroupBounds.top + selectedGroupBounds.height - 8,
+              zIndex: 81,
+            }}
+            onPointerDown={startGroupResize}
+          />
+          <div
+            className={selectionActionPanelClass}
+            style={{
+              left: selectedGroupBounds.left,
+              top: selectedGroupBounds.top + selectedGroupBounds.height + 8,
+              zIndex: 80,
+            }}
+          >
+            {renderMoveActionButton()}
+            {canDuplicateGroupSelection &&
+              renderSelectionActionButton(
+                "Duplicate",
+                "Duplicate selected objects",
+                duplicateSelectedObjects
+              )}
+            {renderSelectionActionButton("Cut", "Cut selected objects", cutSelectedObjects)}
+            {renderSelectionActionButton("Copy", "Copy selected objects", copySelectedObjects)}
+            {objectClipboard.length > 0 &&
+              renderSelectionActionButton(
+                "Paste",
+                "Paste copied or cut objects",
+                pasteObjectClipboard
+              )}
+            {renderSelectionActionButton(
+              "Delete",
+              "Delete selected objects",
+              deleteSelectedObjects
             )}
-          {renderSelectionActionButton("Cut", "Cut selected objects", cutSelectedObjects)}
-          {renderSelectionActionButton("Copy", "Copy selected objects", copySelectedObjects)}
-          {objectClipboard.length > 0 &&
-            renderSelectionActionButton(
-              "Paste",
-              "Paste copied or cut objects",
-              pasteObjectClipboard
-            )}
-          {renderSelectionActionButton(
-            "Delete",
-            "Delete selected objects",
-            deleteSelectedObjects
-          )}
-        </div>
+          </div>
+        </>
       )}
 
       {!selectedGroupBounds && objectClipboard.length > 0 && objectClipboardAnchor && (

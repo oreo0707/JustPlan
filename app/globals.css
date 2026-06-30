@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 .tutorial-active-target {
-  outline: 3px solid rgba(115, 197, 255, 0.5);
-  outline-offset: 5px;
-  transition: outline-color 180ms ease;
+  outline: 2px solid rgba(100, 116, 139, 0.35);
+  outline-offset: 4px;
+  border-radius: 12px;
+  transition: outline-color 180ms ease, outline-offset 180ms ease;
 }
 
 :root {
@@ -92,7 +93,7 @@ body {
 .cursor-y2k-arrow input,
 .cursor-y2k-arrow textarea,
 .cursor-y2k-arrow select {
-  cursor: url("/cursors/y2k.png") 4 4, auto !important;
+  cursor: url("/cursors/pin-cursor.png") 4 4, auto !important;
 }
 
 .cursor-heart,

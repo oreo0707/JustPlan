@@ -3,19 +3,22 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { AppData, Subject } from "@/lib/types";
+import type { AppData, NoteMaterial, Subject } from "@/lib/types";
 import { defaultData } from "@/lib/default-data";
 import { loadData, saveData } from "@/lib/storage";
 import {
+  addMaterialNoteToSubject,
   addNoteToSubject,
   addTaskToSubject,
   deleteNoteFromSubject,
   deleteTaskFromSubject,
   toggleTaskCompleted,
   updateNoteTitle,
+  updateNoteMaterials,
   updateSubjectName,
   updateTaskDetails,
 } from "@/lib/study-actions";
+import { storeMaterialFile } from "@/lib/material-storage";
 import { TaskCard, type TaskEditValues } from "@/components/TaskCard";
 import { NoteCard } from "@/components/NoteCard";
 import { AppShell } from "@/components/AppShell";
@@ -33,20 +36,26 @@ export default function SubjectPage() {
   const [taskScheduledStartDate, setTaskScheduledStartDate] = useState("");
   const [taskScheduledEndDate, setTaskScheduledEndDate] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
+  const [showNoteMenu, setShowNoteMenu] = useState(false);
+  const [isImportingMaterial, setIsImportingMaterial] = useState(false);
   const [isEditingSubjectName, setIsEditingSubjectName] = useState(false);
   const [subjectNameDraft, setSubjectNameDraft] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
 
   useEffect(() => {
-    const loadedData = loadData();
-    setData(loadedData);
+    const frame = window.requestAnimationFrame(() => {
+      const loadedData = loadData();
+      setData(loadedData);
 
-    const foundSubject = loadedData.subjects.find(
-      (item) => item.id === subjectId
-    );
+      const foundSubject = loadedData.subjects.find(
+        (item) => item.id === subjectId
+      );
 
-    setSubject(foundSubject ?? null);
-    setHasLoaded(true);
+      setSubject(foundSubject ?? null);
+      setHasLoaded(true);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [subjectId]);
 
   useEffect(() => {
@@ -54,13 +63,17 @@ export default function SubjectPage() {
       return;
     }
 
-    saveData(data);
+    const frame = window.requestAnimationFrame(() => {
+      saveData(data);
 
-    const updatedSubject = data.subjects.find(
-      (item) => item.id === subjectId
-    );
+      const updatedSubject = data.subjects.find(
+        (item) => item.id === subjectId
+      );
 
-    setSubject(updatedSubject ?? null);
+      setSubject(updatedSubject ?? null);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [data, hasLoaded, subjectId]);
 
   function handleAddTask() {
@@ -131,8 +144,50 @@ function handleDeleteNote(noteId: string) {
   setData(updatedData);
 }
 
+async function handleImportMaterialNote(file: File) {
+  const allowedTypes = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
+  const lowerName = file.name.toLowerCase();
+  const allowedExtension =
+    lowerName.endsWith(".pdf") ||
+    lowerName.endsWith(".doc") ||
+    lowerName.endsWith(".docx");
+
+  if (!allowedTypes.includes(file.type) && !allowedExtension) {
+    window.alert("Please import a PDF or Word document.");
+    return;
+  }
+
+  setIsImportingMaterial(true);
+
+  try {
+    const fileReference = await storeMaterialFile(file);
+    const material: NoteMaterial = {
+      id: `mat_${crypto.randomUUID().slice(0, 8)}`,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      fileReference,
+      imported_at: new Date().toISOString(),
+      highlights: [],
+    };
+
+    setData(addMaterialNoteToSubject(data, subjectId, material));
+    setShowNoteMenu(false);
+  } finally {
+    setIsImportingMaterial(false);
+  }
+}
+
 function handleSaveNoteTitle(noteId: string, title: string) {
   setData(updateNoteTitle(data, subjectId, noteId, title));
+}
+
+function handleSaveNoteMaterials(noteId: string, materials: NoteMaterial[]) {
+  setData(updateNoteMaterials(data, subjectId, noteId, materials));
 }
 
 function handleSaveSubjectName() {
@@ -169,7 +224,10 @@ function handleSaveSubjectName() {
           ← Back to Home
         </Link>
 
-        <div className="mt-6 rounded-xl border bg-white p-6 shadow-sm">
+        <div
+          className="mt-6 rounded-xl border bg-white p-6 shadow-sm"
+          data-tutorial="subject-header"
+        >
           {isEditingSubjectName ? (
             <form
               className="flex flex-wrap items-center gap-2"
@@ -224,7 +282,10 @@ function handleSaveSubjectName() {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border bg-white p-6 shadow-sm">
+          <div
+            className="rounded-xl border bg-white p-6 shadow-sm"
+            data-tutorial="subject-tasks"
+          >
             <h2 className="text-xl font-semibold">Tasks</h2>
 
             <form
@@ -251,7 +312,7 @@ function handleSaveSubjectName() {
                 />
               </label>
 
-              <div>
+              <div data-tutorial="subject-task-dates">
                 <p className="text-sm text-gray-600">When do you plan to do this?</p>
 
                 <div className="mt-2 flex gap-2">
@@ -345,8 +406,48 @@ function handleSaveSubjectName() {
             )}
           </div>
 
-          <div className="rounded-xl border bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold">Notes</h2>
+          <div
+            className="rounded-xl border bg-white p-6 shadow-sm"
+            data-tutorial="subject-notes"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">Notes</h2>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  className="rounded-lg border px-3 py-1 text-sm"
+                  onClick={() => setShowNoteMenu((current) => !current)}
+                  aria-label="Open note options"
+                  data-tutorial="subject-import-material"
+                >
+                  ...
+                </button>
+
+                {showNoteMenu && (
+                  <div className="absolute right-0 top-9 z-50 w-52 rounded-xl border bg-white p-2 text-sm shadow-lg">
+                    <label className="block cursor-pointer rounded-lg px-3 py-2 hover:bg-gray-50">
+                      {isImportingMaterial
+                        ? "Importing..."
+                        : "Import PDF / Word"}
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        className="hidden"
+                        disabled={isImportingMaterial}
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+
+                          await handleImportMaterialNote(file);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
 
             <form
               className="mt-4 flex gap-2"
@@ -381,8 +482,12 @@ function handleSaveSubjectName() {
                     noteId={note.id}
                     title={note.title}
                     template={note.template}
+                    materials={note.materials ?? []}
                     onSaveTitle={(title) =>
                       handleSaveNoteTitle(note.id, title)
+                    }
+                    onSaveMaterials={(materials) =>
+                      handleSaveNoteMaterials(note.id, materials)
                     }
                     onDelete={() => handleDeleteNote(note.id)}
                   />

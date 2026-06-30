@@ -50,6 +50,7 @@ export default function SubjectsPage() {
         </p>
 
         <form
+          data-tutorial="subjects-add"
           className="mt-6 flex gap-2"
           onSubmit={(event) => {
             event.preventDefault();
@@ -71,7 +72,7 @@ export default function SubjectsPage() {
           </button>
         </form>
 
-        <div className="mt-8 grid gap-3">
+        <div className="mt-8 grid gap-3" data-tutorial="subjects-list">
           {data.subjects.length === 0 && (
             <div className="rounded-xl border border-dashed bg-white p-6 text-center text-gray-500">
               No subjects yet. Add your first subject.

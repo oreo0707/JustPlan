@@ -1,6 +1,7 @@
 import type { AppData } from "./types";
 import { defaultData } from "./default-data";
 import { clearStoredImages } from "./image-storage";
+import { clearStoredMaterials } from "./material-storage";
 
 const STORAGE_KEY = "just-study-data";
 
@@ -58,6 +59,7 @@ export function saveData(data: AppData) {
 export function clearData() {
   localStorage.removeItem(STORAGE_KEY);
   clearStoredImages();
+  clearStoredMaterials();
 }
 
 export function exportDataFile(data: AppData) {

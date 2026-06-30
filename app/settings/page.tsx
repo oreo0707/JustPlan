@@ -173,12 +173,12 @@ export default function SettingsPage() {
     {
       value: "default",
       label: "Default",
-      previewText: "↖",
+      previewImage: "/cursors/default-cursor.png",
     },
     {
       value: "y2k-arrow",
-      label: "Y2K Arrow",
-      previewImage: "/cursors/y2k.png",
+      label: "Pin",
+      previewImage: "/cursors/pin.png",
     },
     {
       value: "heart",
@@ -226,10 +226,6 @@ export default function SettingsPage() {
                 onClick={() =>
                   handleUpdateSettings({
                     theme: "light",
-                    app_background_color: "#f9fafb",
-                    app_surface_color: "#ffffff",
-                    app_accent_color: "#111827",
-                    app_text_color: "#111827",
                   })
                 }
               >
@@ -246,10 +242,6 @@ export default function SettingsPage() {
                 onClick={() =>
                   handleUpdateSettings({
                     theme: "dark",
-                    app_background_color: "#0f172a",
-                    app_surface_color: "#172033",
-                    app_accent_color: "#a78bfa",
-                    app_text_color: "#f8fafc",
                   })
                 }
               >
@@ -258,7 +250,7 @@ export default function SettingsPage() {
             </div>
 
             <p className="mt-2 text-sm text-gray-500">
-              Dark mode UI will be applied later. For now, this saves the preference.
+              Light and dark mode are separate from your custom app colour palette.
             </p>
 
             <div className="mt-6">
@@ -281,16 +273,12 @@ export default function SettingsPage() {
                     }
                   >
                     <div className="flex h-20 w-20 items-center justify-center">
-                      {"previewImage" in cursor ? (
-                        <img
-                          src={cursor.previewImage}
-                          alt={cursor.label}
-                          className="h-16 w-16 object-contain"
-                          draggable={false}
-                        />
-                      ) : (
-                        <span className="text-5xl leading-none">{cursor.previewText}</span>
-                      )}
+                      <img
+                        src={cursor.previewImage}
+                        alt={cursor.label}
+                        className="h-16 w-16 object-contain"
+                        draggable={false}
+                      />
                     </div>
 
                     <p className="mt-3 text-sm font-medium text-gray-800">
@@ -567,7 +555,7 @@ export default function SettingsPage() {
 
               {feedbackStatus === "sent" && (
                 <p className="text-sm text-green-600">
-                  Thanks — your anonymous feedback was sent to Discord.
+                  Thanks — your feedback was sent.
                 </p>
               )}
 
