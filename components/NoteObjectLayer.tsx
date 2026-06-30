@@ -35,6 +35,11 @@ type SelectionBox = {
 
 type LayerDirection = "back" | "front";
 
+type ActiveEraserStroke = {
+  eraseAt: (point: DrawingPoint) => void;
+  finish: () => void;
+};
+
 const NOTE_FONT_FAMILIES = [
   "Arial",
   "Georgia",
@@ -393,6 +398,8 @@ export function NoteObjectLayer({
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
+  const eraserTouchIdRef = useRef<number | null>(null);
+  const activeEraserStrokeRef = useRef<ActiveEraserStroke | null>(null);
   const documentScrollLockRef = useRef<{
     bodyOverflow: string;
     bodyTouchAction: string;
@@ -403,6 +410,12 @@ export function NoteObjectLayer({
   const drawingToolRef = useRef(drawingTool);
   const drawingColorRef = useRef(drawingColor);
   const drawingStrokeWidthRef = useRef(drawingStrokeWidth);
+  const objectsRef = useRef(objects);
+  const onChangeObjectsRef = useRef(onChangeObjects);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const beginEraserStrokeRef = useRef<
+    ((initialPoint: DrawingPoint) => ActiveEraserStroke) | null
+  >(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [selectionPath, setSelectionPath] = useState<DrawingPoint[]>([]);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
@@ -700,7 +713,18 @@ export function NoteObjectLayer({
     drawingToolRef.current = drawingTool;
     drawingColorRef.current = drawingColor;
     drawingStrokeWidthRef.current = drawingStrokeWidth;
-  }, [drawingColor, drawingMode, drawingStrokeWidth, drawingTool]);
+    objectsRef.current = objects;
+    onChangeObjectsRef.current = onChangeObjects;
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [
+    drawingColor,
+    drawingMode,
+    drawingStrokeWidth,
+    drawingTool,
+    objects,
+    onChangeObjects,
+    onSelectionChange,
+  ]);
 
   useEffect(() => {
     if (drawingMode && drawingTool === "erase") {
@@ -1693,28 +1717,13 @@ export function NoteObjectLayer({
     window.addEventListener("pointerup", handleUp);
   }
 
-  function startErasing(event: React.PointerEvent<HTMLDivElement>) {
-    if (!canUsePointerForDrawing(event)) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-
-    const layerBounds = layerRef.current?.getBoundingClientRect();
-    if (!layerBounds) return;
-    const erasingElement = event.currentTarget;
-    const pointerId = event.pointerId;
+  function beginEraserStroke(initialPoint: DrawingPoint): ActiveEraserStroke {
     lockDocumentScrollForEraserStroke();
     setIsEraserScrollLocked(true);
-    let workingObjects = objects;
+    let workingObjects = objectsRef.current;
     let workingPendingDrawings = pendingDrawingsRef.current;
-    const eraserRadius = Math.max(2, drawingStrokeWidth / 2);
+    const eraserRadius = Math.max(2, drawingStrokeWidthRef.current / 2);
     let pendingUndoSnapshotCaptured = false;
-
-    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
-      x: pointerEvent.clientX - layerBounds.left,
-      y: pointerEvent.clientY - layerBounds.top,
-    });
 
     function eraseAt(point: DrawingPoint) {
       if (!isPointInsidePaper(point)) return;
@@ -1740,7 +1749,8 @@ export function NoteObjectLayer({
 
       if (savedChanged) {
         workingObjects = nextObjects;
-        onChangeObjects(nextObjects);
+        objectsRef.current = nextObjects;
+        onChangeObjectsRef.current(nextObjects);
       }
 
       if (pendingChanged) {
@@ -1755,11 +1765,41 @@ export function NoteObjectLayer({
       }
 
       if (savedChanged || pendingChanged) {
-        onSelectionChange([]);
+        onSelectionChangeRef.current([]);
       }
     }
 
-    eraseAt(getPoint(event));
+    function finish() {
+      setEraserPoint(null);
+      setIsEraserScrollLocked(false);
+      unlockDocumentScrollForEraserStroke();
+    }
+
+    eraseAt(initialPoint);
+
+    return { eraseAt, finish };
+  }
+
+  beginEraserStrokeRef.current = beginEraserStroke;
+
+  function startErasing(event: React.PointerEvent<HTMLDivElement>) {
+    if (!canUsePointerForDrawing(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const layerBounds = layerRef.current?.getBoundingClientRect();
+    if (!layerBounds) return;
+    const erasingElement = event.currentTarget;
+    const pointerId = event.pointerId;
+
+    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
+      x: pointerEvent.clientX - layerBounds.left,
+      y: pointerEvent.clientY - layerBounds.top,
+    });
+
+    const eraserStroke = beginEraserStroke(getPoint(event));
 
     function handleMove(moveEvent: PointerEvent) {
       if (moveEvent.pointerId !== pointerId) return;
@@ -1771,7 +1811,9 @@ export function NoteObjectLayer({
           ? moveEvent.getCoalescedEvents()
           : [moveEvent];
 
-      moveEvents.forEach((pointerEvent) => eraseAt(getPoint(pointerEvent)));
+      moveEvents.forEach((pointerEvent) =>
+        eraserStroke.eraseAt(getPoint(pointerEvent))
+      );
     }
 
     function finishErasing(finishEvent: PointerEvent) {
@@ -1782,9 +1824,7 @@ export function NoteObjectLayer({
       erasingElement.removeEventListener("pointerup", finishErasing);
       erasingElement.removeEventListener("pointercancel", finishErasing);
       erasingElement.removeEventListener("lostpointercapture", finishErasing);
-      setEraserPoint(null);
-      setIsEraserScrollLocked(false);
-      unlockDocumentScrollForEraserStroke();
+      eraserStroke.finish();
 
       if (erasingElement.hasPointerCapture(pointerId)) {
         erasingElement.releasePointerCapture(pointerId);
@@ -2037,9 +2077,19 @@ export function NoteObjectLayer({
       };
     }
 
+    function getLayerTouchPoint(touch: Touch) {
+      const layerBounds = layerRef.current?.getBoundingClientRect();
+      if (!layerBounds) return null;
+
+      return {
+        x: touch.clientX - layerBounds.left,
+        y: touch.clientY - layerBounds.top,
+      };
+    }
+
     function handleNativeTouchStart(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
-      if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
+      if (!drawingModeRef.current) return;
 
       const touch = event.changedTouches[0];
       if (!touch) return;
@@ -2048,6 +2098,16 @@ export function NoteObjectLayer({
       event.preventDefault();
       event.stopPropagation();
       suppressPointerDrawingUntilRef.current = Date.now() + 1000;
+
+      if (drawingToolRef.current === "erase") {
+        const point = getLayerTouchPoint(touch);
+        const eraserStrokeStarter = beginEraserStrokeRef.current;
+        if (!point || !eraserStrokeStarter) return;
+
+        eraserTouchIdRef.current = touch.identifier;
+        activeEraserStrokeRef.current = eraserStrokeStarter(point);
+        return;
+      }
 
       const layerBounds = layerRef.current?.getBoundingClientRect();
       if (!layerBounds) return;
@@ -2065,6 +2125,22 @@ export function NoteObjectLayer({
 
     function handleNativeTouchMove(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      const eraserTouchId = eraserTouchIdRef.current;
+
+      if (eraserTouchId !== null) {
+        const touch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === eraserTouchId
+        );
+        if (!touch) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const point = getLayerTouchPoint(touch);
+        if (point) activeEraserStrokeRef.current?.eraseAt(point);
+        return;
+      }
+
       const activeTouchId = activeDrawingPointerIdRef.current;
 
       if (activeTouchId === null || activeTouchId >= 0) return;
@@ -2083,6 +2159,26 @@ export function NoteObjectLayer({
 
     function handleNativeTouchEnd(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      const eraserTouchId = eraserTouchIdRef.current;
+
+      if (eraserTouchId !== null) {
+        const touch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === eraserTouchId
+        );
+        if (!touch) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const point = getLayerTouchPoint(touch);
+        if (point) activeEraserStrokeRef.current?.eraseAt(point);
+
+        activeEraserStrokeRef.current?.finish();
+        activeEraserStrokeRef.current = null;
+        eraserTouchIdRef.current = null;
+        return;
+      }
+
       const activeTouchId = activeDrawingPointerIdRef.current;
 
       if (activeTouchId === null || activeTouchId >= 0) return;
