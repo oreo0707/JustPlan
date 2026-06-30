@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DrawingPoint, NoteObject, ShapeVertex } from "@/lib/types";
 import { StoredImage } from "@/components/StoredImage";
 import { deleteStoredImage } from "@/lib/image-storage";
@@ -393,6 +393,12 @@ export function NoteObjectLayer({
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
+  const documentScrollLockRef = useRef<{
+    bodyOverflow: string;
+    bodyTouchAction: string;
+    htmlOverflow: string;
+    htmlTouchAction: string;
+  } | null>(null);
   const drawingModeRef = useRef(drawingMode);
   const drawingToolRef = useRef(drawingTool);
   const drawingColorRef = useRef(drawingColor);
@@ -401,6 +407,7 @@ export function NoteObjectLayer({
   const [selectionPath, setSelectionPath] = useState<DrawingPoint[]>([]);
   const [activeDrawingPoints, setActiveDrawingPoints] = useState<DrawingPoint[]>([]);
   const [eraserPoint, setEraserPoint] = useState<DrawingPoint | null>(null);
+  const [isEraserScrollLocked, setIsEraserScrollLocked] = useState(false);
   const [pendingDrawings, setPendingDrawings] = useState<NoteObject[]>([]);
   const pendingDrawingsRef = useRef<NoteObject[]>([]);
   const [objectClipboard, setObjectClipboard] = useState<NoteObject[]>([]);
@@ -466,6 +473,41 @@ export function NoteObjectLayer({
   function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
     return event.pointerType !== "touch";
   }
+
+  const lockDocumentScrollForEraserStroke = useCallback(() => {
+    if (typeof document === "undefined" || documentScrollLockRef.current) {
+      return;
+    }
+
+    documentScrollLockRef.current = {
+      bodyOverflow: document.body.style.overflow,
+      bodyTouchAction: document.body.style.touchAction,
+      htmlOverflow: document.documentElement.style.overflow,
+      htmlTouchAction: document.documentElement.style.touchAction,
+    };
+
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    document.documentElement.style.overflow = "hidden";
+    document.documentElement.style.touchAction = "none";
+  }, []);
+
+  const unlockDocumentScrollForEraserStroke = useCallback(() => {
+    if (typeof document === "undefined" || !documentScrollLockRef.current) {
+      return;
+    }
+
+    document.body.style.overflow =
+      documentScrollLockRef.current.bodyOverflow;
+    document.body.style.touchAction =
+      documentScrollLockRef.current.bodyTouchAction;
+    document.documentElement.style.overflow =
+      documentScrollLockRef.current.htmlOverflow;
+    document.documentElement.style.touchAction =
+      documentScrollLockRef.current.htmlTouchAction;
+
+    documentScrollLockRef.current = null;
+  }, []);
 
   function isPointInsidePaper(point: DrawingPoint) {
     return (
@@ -659,6 +701,20 @@ export function NoteObjectLayer({
     drawingColorRef.current = drawingColor;
     drawingStrokeWidthRef.current = drawingStrokeWidth;
   }, [drawingColor, drawingMode, drawingStrokeWidth, drawingTool]);
+
+  useEffect(() => {
+    if (drawingMode && drawingTool === "erase") {
+      return;
+    }
+
+    unlockDocumentScrollForEraserStroke();
+  }, [drawingMode, drawingTool, unlockDocumentScrollForEraserStroke]);
+
+  useEffect(() => {
+    return () => {
+      unlockDocumentScrollForEraserStroke();
+    };
+  }, [unlockDocumentScrollForEraserStroke]);
 
   useEffect(() => {
     const canvas = liveDrawingCanvasRef.current;
@@ -1648,6 +1704,8 @@ export function NoteObjectLayer({
     if (!layerBounds) return;
     const erasingElement = event.currentTarget;
     const pointerId = event.pointerId;
+    lockDocumentScrollForEraserStroke();
+    setIsEraserScrollLocked(true);
     let workingObjects = objects;
     let workingPendingDrawings = pendingDrawingsRef.current;
     const eraserRadius = Math.max(2, drawingStrokeWidth / 2);
@@ -1725,6 +1783,8 @@ export function NoteObjectLayer({
       erasingElement.removeEventListener("pointercancel", finishErasing);
       erasingElement.removeEventListener("lostpointercapture", finishErasing);
       setEraserPoint(null);
+      setIsEraserScrollLocked(false);
+      unlockDocumentScrollForEraserStroke();
 
       if (erasingElement.hasPointerCapture(pointerId)) {
         erasingElement.releasePointerCapture(pointerId);
@@ -2295,6 +2355,8 @@ export function NoteObjectLayer({
   const selectedGroupBounds = hasGroupSelection
     ? getSelectionBounds(selectedObjectIds)
     : null;
+  const shouldLockEraserScroll =
+    isEraserScrollLocked && drawingMode && drawingTool === "erase";
   const canDuplicateGroupSelection = objects.some(
     (object) =>
       selectedObjectIds.includes(object.id) && canDuplicateObject(object)
@@ -2313,11 +2375,11 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: "pan-y",
+        touchAction: shouldLockEraserScroll ? "none" : "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior: "auto",
+        overscrollBehavior: shouldLockEraserScroll ? "none" : "auto",
       }}
       onPointerDown={(event) => {
         if (drawingMode) {
