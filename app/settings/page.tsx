@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import type { AppData, NoteTemplate } from "@/lib/types";
 import { defaultData } from "@/lib/default-data";
@@ -23,6 +23,13 @@ import {
 export default function SettingsPage() {
   const [data, setData] = useState<AppData>(defaultData);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState("general");
+  const [feedbackRating, setFeedbackRating] = useState("5");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [feedbackError, setFeedbackError] = useState("");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -94,6 +101,56 @@ export default function SettingsPage() {
 
     clearData();
     setData(defaultData);
+  }
+
+  async function handleSubmitFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const message = feedbackMessage.trim();
+
+    if (message.length < 5) {
+      setFeedbackStatus("error");
+      setFeedbackError("Please write a little more feedback before sending.");
+      return;
+    }
+
+    setFeedbackStatus("sending");
+    setFeedbackError("");
+
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          category: feedbackCategory,
+          rating: Number(feedbackRating),
+          message,
+          page: "Settings",
+        }),
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+
+        throw new Error(result?.error ?? "Unable to send feedback.");
+      }
+
+      setFeedbackStatus("sent");
+      setFeedbackMessage("");
+      setFeedbackCategory("general");
+      setFeedbackRating("5");
+    } catch (error) {
+      setFeedbackStatus("error");
+      setFeedbackError(
+        error instanceof Error
+          ? error.message
+          : "Unable to send feedback right now."
+      );
+    }
   }
 
   const isDark = data.settings.theme === "dark";
@@ -437,6 +494,88 @@ export default function SettingsPage() {
               Restart All Tutorials
             </button>
           </div>
+        </section>
+
+        <section className={cardClass}>
+          <h2 className={sectionTitleClass}>Feedback Form</h2>
+
+          <p className={`mt-2 text-sm ${mutedTextClass}`}>
+            Tell us how do you feel using Just Note.
+          </p>
+
+          <form className="mt-4 space-y-4" onSubmit={handleSubmitFeedback}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className={isDark ? "text-sm font-medium text-slate-200" : "text-sm font-medium text-gray-700"}>
+                Feedback type
+                <select
+                  className={isDark ? "mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none" : "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"}
+                  value={feedbackCategory}
+                  onChange={(event) => setFeedbackCategory(event.target.value)}
+                >
+                  <option value="general">General feedback</option>
+                  <option value="bug">Bug report</option>
+                  <option value="feature">Feature idea</option>
+                  <option value="design">Design / UI feedback</option>
+                </select>
+              </label>
+
+              <label className={isDark ? "text-sm font-medium text-slate-200" : "text-sm font-medium text-gray-700"}>
+                Rating
+                <select
+                  className={isDark ? "mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none" : "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none"}
+                  value={feedbackRating}
+                  onChange={(event) => setFeedbackRating(event.target.value)}
+                >
+                  <option value="5">5 - Love it</option>
+                  <option value="4">4 - Good</option>
+                  <option value="3">3 - Okay</option>
+                  <option value="2">2 - Needs work</option>
+                  <option value="1">1 - Frustrating</option>
+                </select>
+              </label>
+            </div>
+
+            <label className={isDark ? "block text-sm font-medium text-slate-200" : "block text-sm font-medium text-gray-700"}>
+              Your feedback
+              <textarea
+                className={isDark ? "mt-1 min-h-32 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500" : "mt-1 min-h-32 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none placeholder:text-gray-400"}
+                value={feedbackMessage}
+                maxLength={2000}
+                placeholder="Type here..."
+                onChange={(event) => {
+                  setFeedbackMessage(event.target.value);
+                  if (feedbackStatus !== "sending") {
+                    setFeedbackStatus("idle");
+                    setFeedbackError("");
+                  }
+                }}
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={feedbackStatus === "sending"}
+                className={
+                  feedbackStatus === "sending"
+                    ? "rounded-lg bg-gray-400 px-4 py-2 text-sm text-white"
+                    : "rounded-lg bg-black px-4 py-2 text-sm text-white hover:bg-gray-800"
+                }
+              >
+                {feedbackStatus === "sending" ? "Sending..." : "Send Feedback"}
+              </button>
+
+              {feedbackStatus === "sent" && (
+                <p className="text-sm text-green-600">
+                  Thanks — your anonymous feedback was sent.
+                </p>
+              )}
+
+              {feedbackStatus === "error" && (
+                <p className="text-sm text-red-600">{feedbackError}</p>
+              )}
+            </div>
+          </form>
         </section>
 
         <section className="rounded-xl border bg-white p-6 shadow-sm">
