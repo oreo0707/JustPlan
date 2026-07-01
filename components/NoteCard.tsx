@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { NoteMaterial } from "@/lib/types";
 import { loadStoredMaterial } from "@/lib/material-storage";
@@ -49,6 +50,71 @@ function getPdfViewerUrl(url: string) {
   return `${url}#toolbar=1&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`;
 }
 
+type PdfAnnotationTool = "pan" | "highlight" | "draw" | "erase";
+
+type RenderedPdfPage = {
+  src: string;
+  width: number;
+  height: number;
+};
+
+function createId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSvgPoint(
+  event: ReactPointerEvent<SVGSVGElement>,
+  svg: SVGSVGElement
+) {
+  const rect = svg.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * 100;
+  const y = ((event.clientY - rect.top) / rect.height) * 100;
+
+  return {
+    x: Math.max(0, Math.min(100, x)),
+    y: Math.max(0, Math.min(100, y)),
+  };
+}
+
+function getAnnotationBounds(points: { x: number; y: number }[]) {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function isPointNearAnnotation(
+  point: { x: number; y: number },
+  annotation: NoteMaterial["highlights"][number],
+  radius: number
+) {
+  const points = annotation.points ?? [];
+
+  if (points.length > 0) {
+    return points.some((annotationPoint) => {
+      const xDistance = annotationPoint.x - point.x;
+      const yDistance = annotationPoint.y - point.y;
+      return Math.hypot(xDistance, yDistance) <= radius;
+    });
+  }
+
+  return (
+    point.x >= annotation.x - radius &&
+    point.x <= annotation.x + annotation.width + radius &&
+    point.y >= annotation.y - radius &&
+    point.y <= annotation.y + annotation.height + radius
+  );
+}
+
 function NativePdfViewer({
   materialUrl,
   title,
@@ -68,14 +134,28 @@ function NativePdfViewer({
 function PdfMaterialViewer({
   materialUrl,
   title,
+  material,
+  onSaveMaterial,
 }: {
   materialUrl: string;
   title: string;
+  material: NoteMaterial;
+  onSaveMaterial: (material: NoteMaterial) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const hasRedirectedToPdfRef = useRef(false);
+  const activeAnnotationRef = useRef<NoteMaterial["highlights"][number] | null>(
+    null
+  );
   const [containerWidth, setContainerWidth] = useState(0);
-  const [pageImages, setPageImages] = useState<string[]>([]);
+  const [pdfPages, setPdfPages] = useState<RenderedPdfPage[]>([]);
   const [renderError, setRenderError] = useState("");
+  const [tool, setTool] = useState<PdfAnnotationTool>("pan");
+  const [annotationColor, setAnnotationColor] = useState("#fff08a");
+  const [strokeWidth, setStrokeWidth] = useState(14);
+  const [draftAnnotation, setDraftAnnotation] = useState<
+    NoteMaterial["highlights"][number] | null
+  >(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -107,7 +187,7 @@ function PdfMaterialViewer({
         ).toString();
 
         const pdf = await pdfjsLib.getDocument({ url: materialUrl }).promise;
-        const nextPageImages: string[] = [];
+        const nextPages: RenderedPdfPage[] = [];
         const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
         const targetPageWidth = Math.max(
           280,
@@ -146,12 +226,16 @@ function PdfMaterialViewer({
             viewport,
           }).promise;
 
-          nextPageImages.push(canvas.toDataURL("image/png"));
+          nextPages.push({
+            src: canvas.toDataURL("image/png"),
+            width: viewport.width,
+            height: viewport.height,
+          });
         }
 
         if (!cancelled) {
           setRenderError("");
-          setPageImages(nextPageImages);
+          setPdfPages(nextPages);
         }
       } catch {
         if (!cancelled) {
@@ -167,34 +251,237 @@ function PdfMaterialViewer({
     };
   }, [containerWidth, materialUrl]);
 
+  useEffect(() => {
+    if (!renderError || hasRedirectedToPdfRef.current) return;
+
+    hasRedirectedToPdfRef.current = true;
+    window.location.href = materialUrl;
+  }, [materialUrl, renderError]);
+
+  function saveAnnotations(nextAnnotations: NoteMaterial["highlights"]) {
+    onSaveMaterial({
+      ...material,
+      highlights: nextAnnotations,
+    });
+  }
+
+  function handleAnnotationPointerDown(
+    event: ReactPointerEvent<SVGSVGElement>,
+    pageNumber: number
+  ) {
+    if (tool === "pan") return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const point = getSvgPoint(event, event.currentTarget);
+
+    if (tool === "erase") {
+      const radius = Math.max(2, strokeWidth / 4);
+      saveAnnotations(
+        (material.highlights ?? []).filter(
+          (annotation) =>
+            annotation.page !== pageNumber ||
+            !isPointNearAnnotation(point, annotation, radius)
+        )
+      );
+      return;
+    }
+
+    const newAnnotation: NoteMaterial["highlights"][number] = {
+      id: createId("material-mark"),
+      page: pageNumber,
+      tool,
+      x: point.x,
+      y: point.y,
+      width: 0,
+      height: 0,
+      color: annotationColor,
+      strokeWidth,
+      points: [point],
+    };
+
+    activeAnnotationRef.current = newAnnotation;
+    setDraftAnnotation(newAnnotation);
+  }
+
+  function handleAnnotationPointerMove(
+    event: ReactPointerEvent<SVGSVGElement>
+  ) {
+    if (tool === "pan" || tool === "erase" || !activeAnnotationRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const point = getSvgPoint(event, event.currentTarget);
+    const nextPoints = [...(activeAnnotationRef.current.points ?? []), point];
+    const bounds = getAnnotationBounds(nextPoints);
+    const nextAnnotation = {
+      ...activeAnnotationRef.current,
+      ...bounds,
+      points: nextPoints,
+    };
+
+    activeAnnotationRef.current = nextAnnotation;
+    setDraftAnnotation(nextAnnotation);
+  }
+
+  function handleAnnotationPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const finishedAnnotation = activeAnnotationRef.current;
+    activeAnnotationRef.current = null;
+    setDraftAnnotation(null);
+
+    if (!finishedAnnotation || (finishedAnnotation.points?.length ?? 0) < 2) {
+      return;
+    }
+
+    saveAnnotations([...(material.highlights ?? []), finishedAnnotation]);
+  }
+
+  function renderAnnotation(
+    annotation: NoteMaterial["highlights"][number],
+    page: RenderedPdfPage
+  ) {
+    const points = annotation.points ?? [];
+    const linePoints = points
+      .map(
+        (point) =>
+          `${(point.x / 100) * page.width},${(point.y / 100) * page.height}`
+      )
+      .join(" ");
+
+    if (points.length > 0) {
+      return (
+        <polyline
+          key={annotation.id}
+          points={linePoints}
+          fill="none"
+          stroke={annotation.color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={annotation.strokeWidth ?? 10}
+          opacity={annotation.tool === "highlight" ? 0.45 : 1}
+        />
+      );
+    }
+
+    return (
+      <rect
+        key={annotation.id}
+        x={(annotation.x / 100) * page.width}
+        y={(annotation.y / 100) * page.height}
+        width={(annotation.width / 100) * page.width}
+        height={(annotation.height / 100) * page.height}
+        fill={annotation.color}
+        opacity={0.45}
+      />
+    );
+  }
+
   return (
     <div
       ref={containerRef}
       className="mx-auto min-h-full w-full overflow-visible bg-gray-200 px-3 py-4"
     >
       {renderError ? (
-        <div className="mx-auto max-w-md rounded-xl bg-white p-6 text-center text-sm text-gray-600 shadow-sm">
-          <p>{renderError}</p>
-          <a
-            href={materialUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 inline-block rounded-lg bg-black px-4 py-2 text-white"
-          >
-            Open PDF
-          </a>
+        <div className="flex min-h-[50vh] items-center justify-center text-sm text-gray-500">
+          Opening PDF...
         </div>
-      ) : pageImages.length > 0 ? (
+      ) : pdfPages.length > 0 ? (
         <div className="flex flex-col items-center gap-4">
-          {pageImages.map((pageImage, index) => (
-            <img
-              key={`${title}-${index}`}
-              src={pageImage}
-              alt={`${title} page ${index + 1}`}
-              className="h-auto max-w-full rounded-lg bg-white shadow-md"
-              draggable={false}
+          <div className="sticky top-2 z-20 flex max-w-full items-center gap-2 rounded-full border bg-white/90 px-3 py-2 text-xs shadow-lg backdrop-blur">
+            {(["pan", "highlight", "draw", "erase"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={
+                  tool === option
+                    ? "rounded-full bg-black px-3 py-1 text-white"
+                    : "rounded-full border px-3 py-1 text-gray-700"
+                }
+                onClick={() => setTool(option)}
+              >
+                {option === "pan"
+                  ? "Pan"
+                  : option === "highlight"
+                    ? "Highlight"
+                    : option === "draw"
+                      ? "Pencil"
+                      : "Eraser"}
+              </button>
+            ))}
+
+            <input
+              type="color"
+              value={annotationColor}
+              onChange={(event) => setAnnotationColor(event.target.value)}
+              className="h-8 w-8 rounded border bg-white"
+              aria-label="Annotation color"
+              disabled={tool === "erase"}
             />
-          ))}
+
+            <input
+              type="range"
+              min="4"
+              max="36"
+              value={strokeWidth}
+              onChange={(event) => setStrokeWidth(Number(event.target.value))}
+              className="w-20"
+              aria-label="Annotation thickness"
+            />
+          </div>
+
+          {pdfPages.map((page, index) => {
+            const pageNumber = index + 1;
+            const pageAnnotations = (material.highlights ?? []).filter(
+              (annotation) => (annotation.page ?? 1) === pageNumber
+            );
+            const visibleAnnotations =
+              draftAnnotation?.page === pageNumber
+                ? [...pageAnnotations, draftAnnotation]
+                : pageAnnotations;
+
+            return (
+              <div
+                key={`${title}-${index}`}
+                className="relative max-w-full rounded-lg bg-white shadow-md"
+                style={{ width: page.width }}
+              >
+                <img
+                  src={page.src}
+                  alt={`${title} page ${pageNumber}`}
+                  className="h-auto max-w-full rounded-lg bg-white"
+                  draggable={false}
+                />
+                <svg
+                  className="absolute inset-0 h-full w-full"
+                  viewBox={`0 0 ${page.width} ${page.height}`}
+                  preserveAspectRatio="none"
+                  style={{
+                    touchAction: tool === "pan" ? "auto" : "none",
+                    pointerEvents: tool === "pan" ? "none" : "auto",
+                  }}
+                  onPointerDown={(event) =>
+                    handleAnnotationPointerDown(event, pageNumber)
+                  }
+                  onPointerMove={handleAnnotationPointerMove}
+                  onPointerUp={handleAnnotationPointerUp}
+                  onPointerCancel={handleAnnotationPointerUp}
+                >
+                  {visibleAnnotations.map((annotation) =>
+                    renderAnnotation(annotation, page)
+                  )}
+                </svg>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="flex min-h-[50vh] items-center justify-center text-sm text-gray-500">
@@ -212,6 +499,7 @@ export function NoteCard({
   template,
   materials = [],
   onSaveTitle,
+  onSaveMaterials,
   onDelete,
 }: NoteCardProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -386,6 +674,10 @@ export function NoteCard({
                 <PdfMaterialViewer
                   materialUrl={materialUrl}
                   title={material.name}
+                  material={material}
+                  onSaveMaterial={(nextMaterial) =>
+                    onSaveMaterials([nextMaterial])
+                  }
                 />
               ) : (
                 <NativePdfViewer

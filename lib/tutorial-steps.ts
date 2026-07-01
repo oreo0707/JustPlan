@@ -187,6 +187,36 @@ export const settingsTutorialSteps: TutorialStep[] = [
       "Send anonymous feedback when something feels confusing, useful, or worth improving.",
     target: '[data-tutorial="settings-feedback"]',
   },
+  {
+    title: "Recently deleted",
+    description:
+      "Recover deleted notes here, or permanently delete them. Deleted notes stay for 30 days.",
+    target: '[data-tutorial="settings-recently-deleted"]',
+  },
+  {
+    title: "Backup & restore",
+    description:
+      "Keep a backup of your study data, or move your subjects, tasks, notes, and settings to another device.",
+    target: '[data-tutorial="settings-backup"]',
+  },
+  {
+    title: "Export backup",
+    description:
+      "Download a backup file before switching devices or making big changes.",
+    target: '[data-tutorial="settings-export-backup"]',
+  },
+  {
+    title: "Import backup",
+    description:
+      "Restore from a backup file. This replaces the current data on this device.",
+    target: '[data-tutorial="settings-import-backup"]',
+  },
+  {
+    title: "Reset data",
+    description:
+      "Use this only when you want to clear everything and start fresh.",
+    target: '[data-tutorial="settings-reset-data"]',
+  },
 ];
 
 export function getTutorialForPathname(

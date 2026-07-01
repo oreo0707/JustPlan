@@ -19,11 +19,15 @@ export type NoteTemplate = "plain" | "lined" | "grid" | "dots";
 
 export type NoteMaterialHighlight = {
   id: string;
+  page?: number;
+  tool?: "highlight" | "draw";
   x: number;
   y: number;
   width: number;
   height: number;
   color: string;
+  strokeWidth?: number;
+  points?: DrawingPoint[];
 };
 
 export type NoteMaterial = {

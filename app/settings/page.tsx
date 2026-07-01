@@ -699,7 +699,10 @@ export default function SettingsPage() {
           </form>
         </section>
 
-        <section className={cardClass}>
+        <section
+          className={cardClass}
+          data-tutorial="settings-recently-deleted"
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className={sectionTitleClass}>Recently Deleted</h2>
@@ -802,7 +805,10 @@ export default function SettingsPage() {
           )}
         </section>
 
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section
+          className="rounded-xl border bg-white p-6 shadow-sm"
+          data-tutorial="settings-backup"
+        >
           <h2 className="text-xl font-semibold text-gray-900">
             Backup & Restore
           </h2>
@@ -817,11 +823,15 @@ export default function SettingsPage() {
               type="button"
               className="rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               onClick={handleExportBackup}
+              data-tutorial="settings-export-backup"
             >
               Export Backup
             </button>
 
-            <label className="cursor-pointer rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            <label
+              className="cursor-pointer rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              data-tutorial="settings-import-backup"
+            >
               Import Backup
               <input
                 type="file"
@@ -843,13 +853,14 @@ export default function SettingsPage() {
               type="button"
               className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
               onClick={handleResetData}
+              data-tutorial="settings-reset-data"
             >
               Reset All Data
             </button>
           </div>
 
           <div className="mt-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
-            <p className="font-medium text-gray-800">Moving to a new laptop?</p>
+            <p className="font-medium text-gray-800">Moving to a new device?</p>
             <p className="mt-1">
               Export your backup from the old device, then import the backup file on
               the new device.
