@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { NoteMaterial } from "@/lib/types";
 import { deleteStoredMaterial, loadStoredMaterial } from "@/lib/material-storage";
 
@@ -45,8 +45,144 @@ function removeMaterialFileExtension(fileName: string) {
   return fileName.replace(/\.(pdf|docx?)$/i, "");
 }
 
-function getPdfViewerUrl(url: string) {
-  return `${url}#toolbar=1&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`;
+function PdfMaterialViewer({
+  materialUrl,
+  title,
+}: {
+  materialUrl: string;
+  title: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [pageImages, setPageImages] = useState<string[]>([]);
+  const [renderError, setRenderError] = useState("");
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      setContainerWidth(Math.floor(entry.contentRect.width));
+    });
+
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!materialUrl || containerWidth <= 0) return;
+
+    let cancelled = false;
+
+    async function renderPdfPages() {
+      try {
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.mjs",
+          import.meta.url
+        ).toString();
+
+        const pdf = await pdfjsLib.getDocument({ url: materialUrl }).promise;
+        const nextPageImages: string[] = [];
+        const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const targetPageWidth = Math.max(
+          280,
+          Math.min(containerWidth - 24, 1200)
+        );
+
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          if (cancelled) return;
+
+          const page = await pdf.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const scale = targetPageWidth / baseViewport.width;
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+
+          if (!context) continue;
+
+          canvas.width = Math.ceil(viewport.width * devicePixelRatio);
+          canvas.height = Math.ceil(viewport.height * devicePixelRatio);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+
+          context.setTransform(
+            devicePixelRatio,
+            0,
+            0,
+            devicePixelRatio,
+            0,
+            0
+          );
+
+          await page.render({
+            canvas,
+            canvasContext: context,
+            viewport,
+          }).promise;
+
+          nextPageImages.push(canvas.toDataURL("image/png"));
+        }
+
+        if (!cancelled) {
+          setRenderError("");
+          setPageImages(nextPageImages);
+        }
+      } catch {
+        if (!cancelled) {
+          setRenderError("This PDF could not be previewed in the app.");
+        }
+      }
+    }
+
+    void renderPdfPages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [containerWidth, materialUrl]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="mx-auto min-h-full w-full overflow-visible bg-gray-200 px-3 py-4"
+    >
+      {renderError ? (
+        <div className="mx-auto max-w-md rounded-xl bg-white p-6 text-center text-sm text-gray-600 shadow-sm">
+          <p>{renderError}</p>
+          <a
+            href={materialUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-block rounded-lg bg-black px-4 py-2 text-white"
+          >
+            Open PDF
+          </a>
+        </div>
+      ) : pageImages.length > 0 ? (
+        <div className="flex flex-col items-center gap-4">
+          {pageImages.map((pageImage, index) => (
+            <img
+              key={`${title}-${index}`}
+              src={pageImage}
+              alt={`${title} page ${index + 1}`}
+              className="h-auto max-w-full rounded-lg bg-white shadow-md"
+              draggable={false}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-[50vh] items-center justify-center text-sm text-gray-500">
+          Loading PDF pages...
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function NoteCard({
@@ -215,20 +351,10 @@ export function NoteCard({
             }}
           >
             {materialUrl && isPdfMaterial(material) ? (
-              <div className="mx-auto flex min-h-full w-full justify-center bg-gray-200 p-0 sm:p-4">
-                <object
-                  data={getPdfViewerUrl(materialUrl)}
-                  type="application/pdf"
-                  title={material.name}
-                  className="h-[calc(100dvh-49px)] min-h-[calc(100dvh-49px)] w-full max-w-5xl rounded-none border-0 bg-white shadow-none sm:rounded-xl sm:shadow-lg"
-                >
-                  <iframe
-                    src={getPdfViewerUrl(materialUrl)}
-                    title={material.name}
-                    className="h-[calc(100dvh-49px)] w-full border-0 bg-white"
-                  />
-                </object>
-              </div>
+              <PdfMaterialViewer
+                materialUrl={materialUrl}
+                title={material.name}
+              />
             ) : materialUrl && isWordMaterial(material) ? (
               <div className="flex h-full items-center justify-center bg-white p-8 text-center">
                 <div>
