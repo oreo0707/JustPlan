@@ -4,6 +4,7 @@ export const defaultData: AppData = {
   subjects: [],
   settings: {
     theme: "light",
+    app_theme: "light",
     cursor_style: "default",
     default_font_size: 16,
     default_font_family: "Arial",

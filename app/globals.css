@@ -33,8 +33,22 @@ body {
 }
 
 .app-color-theme > main,
-.app-color-theme .bg-gray-50 {
+.app-color-theme .bg-gray-50,
+.app-color-theme .bg-gray-100 {
   background-color: var(--app-theme-background) !important;
+}
+
+.app-color-theme :is(input, textarea, select) {
+  background-color: var(--app-theme-surface);
+  color: var(--app-theme-text);
+}
+
+.app-color-theme :is(.border, .border-gray-200, .border-gray-300, .border-gray-800) {
+  border-color: color-mix(
+    in srgb,
+    var(--app-theme-text) 25%,
+    transparent
+  ) !important;
 }
 
 .app-color-theme .app-theme-nav-link:hover {
@@ -84,6 +98,14 @@ body {
 .app-color-theme
   :is(.text-gray-950, .text-gray-900, .text-gray-800, .text-gray-700) {
   color: var(--app-theme-text) !important;
+}
+
+.app-color-theme :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+  color: color-mix(
+    in srgb,
+    var(--app-theme-text) 68%,
+    transparent
+  ) !important;
 }
 
 .cursor-y2k-arrow,

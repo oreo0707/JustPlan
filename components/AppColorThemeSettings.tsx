@@ -1,6 +1,7 @@
 "use client";
 
 import type { AppData } from "@/lib/types";
+import { appThemeOptions, type AppThemeId } from "@/lib/app-themes";
 
 type AppColors = Pick<
   AppData["settings"],
@@ -14,6 +15,7 @@ type AppColorThemeSettingsProps = {
   colors: AppColors;
   savedTemplate: AppData["settings"]["saved_app_color_template"];
   onChange: (colors: Partial<AppColors>) => void;
+  onApplyTheme: (themeId: AppThemeId) => void;
   onSave: (name: string) => void;
   onDelete: () => void;
 };
@@ -45,70 +47,23 @@ const colorFields: Array<{
   },
 ];
 
-const presets: Array<{ label: string; colors: AppColors }> = [
-  {
-    label: "Milky Mocca",
-    colors: {
-      app_background_color: "#fefeec",
-      app_surface_color: "#d7ecef",
-      app_accent_color: "#d7b7be",
-      app_text_color: "#806042",
-    },
-  },
-  {
-    label: "Winter Tune",
-    colors: {
-      app_background_color: "#efe6e6",
-      app_surface_color: "#d4e8f7",
-      app_accent_color: "#b8a8a9",
-      app_text_color: "#b2909d",
-    },
-  },
-  {
-    label: "Cloudy Pink",
-    colors: {
-      app_background_color: "#fff5ea",
-      app_surface_color: "#fefefb",
-      app_accent_color: "#dad2d6",
-      app_text_color: "#b58c8c",
-    },
-  },
-  {
-    label: "Light Taro",
-    colors: {
-      app_background_color: "#c6c8e6",
-      app_surface_color: "#fef6e1",
-      app_accent_color: "#8c6e63",
-      app_text_color: "#b08e6d",
-    },
-  },
-  {
-    label: "Midnight Haze",
-    colors: {
-      app_background_color: "#02122f",
-      app_surface_color: "#23354d",
-      app_accent_color: "#495b7d",
-      app_text_color: "#8ba3c5",
-    },
-  },
-];
-
 export function AppColorThemeSettings({
   colors,
   savedTemplate,
   onChange,
+  onApplyTheme,
   onSave,
   onDelete,
 }: AppColorThemeSettingsProps) {
   return (
     <div className="mt-5">
       <div className="flex flex-wrap gap-2">
-        {presets.map((preset) => (
+        {appThemeOptions.slice(2).map((preset) => (
           <button
-            key={preset.label}
+            key={preset.id}
             type="button"
             className="rounded-full border px-3 py-1.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-sm"
-            onClick={() => onChange(preset.colors)}
+            onClick={() => onApplyTheme(preset.id)}
           >
             <span
               className="mr-2 inline-block h-3 w-3 rounded-full align-[-1px]"

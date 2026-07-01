@@ -139,6 +139,15 @@ export type Subject = {
 
 export type Settings = {
   theme: "light" | "dark";
+  app_theme:
+    | "light"
+    | "dark"
+    | "milky-mocca"
+    | "winter-tune"
+    | "cloudy-pink"
+    | "light-taro"
+    | "midnight-haze"
+    | "custom";
   cursor_style: "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star" ;
   default_font_size: number;
   default_font_family: string;

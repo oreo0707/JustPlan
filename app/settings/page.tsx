@@ -18,6 +18,7 @@ import {
 } from "@/lib/study-actions";
 import { applyCursorStyle } from "@/lib/apply-cursor";
 import { AppColorThemeSettings } from "@/components/AppColorThemeSettings";
+import { appThemeOptions, type AppThemeId } from "@/lib/app-themes";
 import { deleteStoredMaterial } from "@/lib/material-storage";
 import { deleteStoredImage, isStoredImageReference } from "@/lib/image-storage";
 import {
@@ -137,6 +138,17 @@ export default function SettingsPage() {
       saveData(updatedData);
       window.dispatchEvent(new Event("app-colors-changed"));
     }
+  }
+
+  function handleApplyAppTheme(themeId: AppThemeId) {
+    const themeOption = appThemeOptions.find((option) => option.id === themeId);
+    if (!themeOption) return;
+
+    handleUpdateSettings({
+      app_theme: themeOption.id,
+      theme: themeOption.noteTheme,
+      ...themeOption.colors,
+    });
   }
 
   function handleExportBackup() {
@@ -340,44 +352,40 @@ export default function SettingsPage() {
           </h2>
 
           <div className="mt-4">
-            <p className="text-sm font-medium text-gray-700">Default Theme</p>
+            <p className="text-sm font-medium text-gray-700">App Theme</p>
 
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                className={
-                  data.settings.theme === "light"
-                    ? "rounded-lg bg-black px-4 py-2 text-sm text-white"
-                    : "rounded-lg border px-4 py-2 text-sm text-gray-700"
-                }
-                onClick={() =>
-                  handleUpdateSettings({
-                    theme: "light",
-                  })
-                }
-              >
-                Light
-              </button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {appThemeOptions.slice(0, 2).map((themeOption) => {
+                const isSelected =
+                  (data.settings.app_theme ?? data.settings.theme) ===
+                  themeOption.id;
 
-              <button
-                type="button"
-                className={
-                  data.settings.theme === "dark"
-                    ? "rounded-lg bg-black px-4 py-2 text-sm text-white"
-                    : "rounded-lg border px-4 py-2 text-sm text-gray-700"
-                }
-                onClick={() =>
-                  handleUpdateSettings({
-                    theme: "dark",
-                  })
-                }
-              >
-                Dark
-              </button>
+                return (
+                  <button
+                    key={themeOption.id}
+                    type="button"
+                    className={
+                      isSelected
+                        ? "rounded-full border-2 border-black px-3 py-1.5 text-xs font-semibold shadow-sm"
+                        : "rounded-full border px-3 py-1.5 text-xs font-semibold hover:shadow-sm"
+                    }
+                    onClick={() => handleApplyAppTheme(themeOption.id)}
+                  >
+                    <span
+                      className="mr-2 inline-block h-3 w-3 rounded-full align-[-1px]"
+                      style={{
+                        backgroundColor: themeOption.colors.app_accent_color,
+                      }}
+                    />
+                    {themeOption.label}
+                  </button>
+                );
+              })}
             </div>
 
             <p className="mt-2 text-sm text-gray-500">
-              Light and dark mode are separate from your custom app colour palette.
+              Each theme changes the whole app palette. Your note editor stays
+              unchanged except when Dark is selected.
             </p>
 
             <div className="mt-6" data-tutorial="settings-cursors">
@@ -436,7 +444,13 @@ export default function SettingsPage() {
               app_text_color: data.settings.app_text_color,
             }}
             savedTemplate={data.settings.saved_app_color_template}
-            onChange={handleUpdateSettings}
+            onChange={(colors) =>
+              handleUpdateSettings({
+                app_theme: "custom",
+                ...colors,
+              })
+            }
+            onApplyTheme={handleApplyAppTheme}
             onSave={(name) =>
               handleUpdateSettings({
                 saved_app_color_template: {
