@@ -827,11 +827,6 @@ export default function SettingsPage() {
             Backup & Restore
           </h2>
 
-          <p className="mt-2 text-sm text-gray-500">
-            Export a backup file to keep your study data safe or move it to another
-            device. Importing a backup will replace the current data on this device.
-          </p>
-
           <div className="mt-5 flex flex-wrap gap-3">
             <button
               type="button"
