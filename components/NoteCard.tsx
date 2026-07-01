@@ -45,6 +45,10 @@ function removeMaterialFileExtension(fileName: string) {
   return fileName.replace(/\.(pdf|docx?)$/i, "");
 }
 
+function getPdfViewerUrl(url: string) {
+  return `${url}#toolbar=1&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`;
+}
+
 export function NoteCard({
   subjectId,
   noteId,
@@ -188,8 +192,8 @@ export function NoteCard({
       </div>
 
       {showMaterialViewer && material && (
-        <div className="fixed inset-0 z-[10000] flex flex-col bg-gray-100">
-          <div className="flex items-center gap-3 border-b bg-white px-4 py-2 shadow-sm">
+        <div className="fixed inset-0 z-[10000] flex h-[100dvh] flex-col bg-gray-100">
+          <div className="flex shrink-0 items-center gap-3 border-b bg-white px-4 py-2 shadow-sm">
             <button
               type="button"
               className="rounded-lg border px-3 py-1 text-lg leading-none text-gray-700"
@@ -203,13 +207,28 @@ export function NoteCard({
             </h2>
           </div>
 
-          <main className="min-h-0 flex-1 overflow-hidden bg-gray-100">
+          <main
+            className="min-h-0 flex-1 overflow-auto bg-gray-200"
+            style={{
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+            }}
+          >
             {materialUrl && isPdfMaterial(material) ? (
-              <iframe
-                src={materialUrl}
-                title={material.name}
-                className="h-full w-full border-0"
-              />
+              <div className="mx-auto flex min-h-full w-full justify-center bg-gray-200 p-0 sm:p-4">
+                <object
+                  data={getPdfViewerUrl(materialUrl)}
+                  type="application/pdf"
+                  title={material.name}
+                  className="h-[calc(100dvh-49px)] min-h-[calc(100dvh-49px)] w-full max-w-5xl rounded-none border-0 bg-white shadow-none sm:rounded-xl sm:shadow-lg"
+                >
+                  <iframe
+                    src={getPdfViewerUrl(materialUrl)}
+                    title={material.name}
+                    className="h-[calc(100dvh-49px)] w-full border-0 bg-white"
+                  />
+                </object>
+              </div>
             ) : materialUrl && isWordMaterial(material) ? (
               <div className="flex h-full items-center justify-center bg-white p-8 text-center">
                 <div>
