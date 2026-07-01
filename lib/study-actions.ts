@@ -15,6 +15,14 @@ function removeMaterialFileExtension(fileName: string) {
   return fileName.replace(/\.(pdf|docx?)$/i, "");
 }
 
+function stripDeletedNoteMetadata(note: Note): Note {
+  const nextNote = { ...note };
+  delete nextNote.deleted_at;
+  delete nextNote.deleted_from_subject_id;
+  delete nextNote.deleted_from_subject_name;
+  return nextNote;
+}
+
 export function addSubject(
   data: AppData,
   name: string,
@@ -247,6 +255,21 @@ export function deleteNoteFromSubject(
   subjectId: string,
   noteId: string
 ): AppData {
+  const subjectToUpdate = data.subjects.find(
+    (subject) => subject.id === subjectId
+  );
+  const noteToDelete = subjectToUpdate?.notes.find(
+    (note) => note.id === noteId
+  );
+  const deletedNote = noteToDelete
+    ? {
+        ...noteToDelete,
+        deleted_at: new Date().toISOString(),
+        deleted_from_subject_id: subjectId,
+        deleted_from_subject_name: subjectToUpdate?.name ?? "",
+      }
+    : null;
+
   return {
     ...data,
     subjects: data.subjects.map((subject) => {
@@ -259,6 +282,101 @@ export function deleteNoteFromSubject(
         notes: subject.notes.filter((note) => note.id !== noteId),
       };
     }),
+    recently_deleted: deletedNote
+      ? {
+          ...data.recently_deleted,
+          notes: [
+            deletedNote,
+            ...data.recently_deleted.notes.filter(
+              (note) => note.id !== noteId
+            ),
+          ],
+        }
+      : data.recently_deleted,
+  };
+}
+
+export function recoverDeletedNotes(
+  data: AppData,
+  noteIds: string[]
+): AppData {
+  const selectedIds = new Set(noteIds);
+  const notesToRecover = data.recently_deleted.notes.filter((note) =>
+    selectedIds.has(note.id)
+  );
+
+  if (!notesToRecover.length) return data;
+
+  const existingSubjectIds = new Set(data.subjects.map((subject) => subject.id));
+  const orphanedNotes = notesToRecover.filter(
+    (note) =>
+      !note.deleted_from_subject_id ||
+      !existingSubjectIds.has(note.deleted_from_subject_id)
+  );
+  const recoveredSubject =
+    orphanedNotes.length > 0
+      ? {
+          id: generateId("subj"),
+          name: "Recovered Notes",
+          icon: "",
+          tasks: [],
+          notes: orphanedNotes.map(
+            (note) => ({
+              ...stripDeletedNoteMetadata(note),
+              updated_at: new Date().toISOString(),
+            })
+          ),
+        }
+      : null;
+
+  return {
+    ...data,
+    subjects: [
+      ...data.subjects.map((subject) => {
+      const notesForSubject = notesToRecover.filter(
+        (note) => note.deleted_from_subject_id === subject.id
+      );
+
+      if (!notesForSubject.length) return subject;
+
+      return {
+        ...subject,
+        notes: [
+          ...subject.notes,
+          ...notesForSubject.map(
+            (note) => ({
+              ...stripDeletedNoteMetadata(note),
+              updated_at: new Date().toISOString(),
+            })
+          ),
+        ],
+      };
+      }),
+      ...(recoveredSubject ? [recoveredSubject] : []),
+    ],
+    recently_deleted: {
+      ...data.recently_deleted,
+      notes: data.recently_deleted.notes.filter(
+        (note) => !selectedIds.has(note.id)
+      ),
+    },
+  };
+}
+
+export function permanentlyDeleteNotes(
+  data: AppData,
+  noteIds: string[]
+): AppData {
+  const selectedIds = new Set(noteIds);
+
+  return {
+    ...data,
+    recently_deleted: {
+      ...data.recently_deleted,
+      notes: data.recently_deleted.notes.filter(
+        (note) => !selectedIds.has(note.id)
+      ),
+    },
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import type { AppData, NoteTemplate } from "@/lib/types";
+import type { AppData, Note, NoteTemplate } from "@/lib/types";
 import { defaultData } from "@/lib/default-data";
 import {
   clearData,
@@ -11,14 +11,72 @@ import {
   loadData,
   saveData,
 } from "@/lib/storage";
-import { updateSettings } from "@/lib/study-actions";
+import {
+  permanentlyDeleteNotes,
+  recoverDeletedNotes,
+  updateSettings,
+} from "@/lib/study-actions";
 import { applyCursorStyle } from "@/lib/apply-cursor";
 import { AppColorThemeSettings } from "@/components/AppColorThemeSettings";
+import { deleteStoredMaterial } from "@/lib/material-storage";
+import { deleteStoredImage, isStoredImageReference } from "@/lib/image-storage";
 import {
   REPLAY_TUTORIAL_EVENT,
   RESTART_TUTORIALS_EVENT,
 } from "@/components/TutorialController";
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isDeletedNoteExpired(note: Note, currentTime: number) {
+  if (!note.deleted_at) return false;
+
+  const deletedTime = new Date(note.deleted_at).getTime();
+  if (Number.isNaN(deletedTime)) return false;
+
+  return currentTime - deletedTime >= THIRTY_DAYS_MS;
+}
+
+function getExpiredDeletedNotes(nextData: AppData, currentTime: number) {
+  return nextData.recently_deleted.notes.filter((note) =>
+    isDeletedNoteExpired(note, currentTime)
+  );
+}
+
+function removeExpiredDeletedNotes(nextData: AppData, currentTime: number) {
+  const activeNotes = nextData.recently_deleted.notes.filter(
+    (note) => !isDeletedNoteExpired(note, currentTime)
+  );
+
+  if (activeNotes.length === nextData.recently_deleted.notes.length) {
+    return nextData;
+  }
+
+  return {
+    ...nextData,
+    recently_deleted: {
+      ...nextData.recently_deleted,
+      notes: activeNotes,
+    },
+  };
+}
+
+async function deleteStoredFilesForNotes(notes: Note[]) {
+  await Promise.all(
+    notes.flatMap((note) => [
+      ...(note.materials ?? []).map((material) =>
+        deleteStoredMaterial(material.fileReference)
+      ),
+      ...note.objects
+        .filter(
+          (object) =>
+            object.type === "image" &&
+            object.src &&
+            isStoredImageReference(object.src)
+        )
+        .map((object) => deleteStoredImage(object.src as string)),
+    ])
+  );
+}
 
 export default function SettingsPage() {
   const [data, setData] = useState<AppData>(defaultData);
@@ -26,6 +84,11 @@ export default function SettingsPage() {
   const [feedbackCategory, setFeedbackCategory] = useState("general");
   const [feedbackRating, setFeedbackRating] = useState("5");
   const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [showRecentlyDeletedNotes, setShowRecentlyDeletedNotes] =
+    useState(false);
+  const [selectedDeletedNoteIds, setSelectedDeletedNoteIds] = useState<
+    string[]
+  >([]);
   const [feedbackStatus, setFeedbackStatus] = useState<
     "idle" | "sending" | "sent" | "error"
   >("idle");
@@ -34,7 +97,17 @@ export default function SettingsPage() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const loadedData = loadData();
-      setData(loadedData);
+      const currentTime = new Date().getTime();
+      const expiredNotes = getExpiredDeletedNotes(loadedData, currentTime);
+      const cleanedData = removeExpiredDeletedNotes(
+        loadedData,
+        currentTime
+      );
+      setData(cleanedData);
+      if (cleanedData !== loadedData) {
+        saveData(cleanedData);
+        void deleteStoredFilesForNotes(expiredNotes);
+      }
       setHasLoaded(true);
     });
 
@@ -101,6 +174,60 @@ export default function SettingsPage() {
 
     clearData();
     setData(defaultData);
+  }
+
+  function getDeletedNoteDescription(note: Note) {
+    const deletedDate = note.deleted_at
+      ? new Date(note.deleted_at).toLocaleDateString()
+      : "Unknown date";
+    const subjectName = note.deleted_from_subject_name || "Unknown subject";
+
+    return `${subjectName} · Deleted ${deletedDate}`;
+  }
+
+  function toggleDeletedNoteSelection(noteId: string) {
+    setSelectedDeletedNoteIds((current) =>
+      current.includes(noteId)
+        ? current.filter((id) => id !== noteId)
+        : [...current, noteId]
+    );
+  }
+
+  function toggleSelectAllDeletedNotes() {
+    const noteIds = data.recently_deleted.notes.map((note) => note.id);
+
+    setSelectedDeletedNoteIds((current) =>
+      current.length === noteIds.length ? [] : noteIds
+    );
+  }
+
+  function handleRecoverDeletedNotes() {
+    if (selectedDeletedNoteIds.length === 0) return;
+
+    const updatedData = recoverDeletedNotes(data, selectedDeletedNoteIds);
+    setData(updatedData);
+    setSelectedDeletedNoteIds([]);
+  }
+
+  async function handlePermanentlyDeleteNotes() {
+    if (selectedDeletedNoteIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      "Permanently delete the selected notes? This cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    const selectedIds = new Set(selectedDeletedNoteIds);
+    const notesToDelete = data.recently_deleted.notes.filter((note) =>
+      selectedIds.has(note.id)
+    );
+
+    await deleteStoredFilesForNotes(notesToDelete);
+
+    const updatedData = permanentlyDeleteNotes(data, selectedDeletedNoteIds);
+    setData(updatedData);
+    setSelectedDeletedNoteIds([]);
   }
 
   async function handleSubmitFeedback(event: FormEvent<HTMLFormElement>) {
@@ -253,7 +380,7 @@ export default function SettingsPage() {
               Light and dark mode are separate from your custom app colour palette.
             </p>
 
-            <div className="mt-6">
+            <div className="mt-6" data-tutorial="settings-cursors">
               <p className="text-sm font-medium text-gray-700">Cursor Style</p>
 
               <div className="mt-2 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -295,7 +422,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className={cardClass}>
+        <section className={cardClass} data-tutorial="settings-colors">
           <h2 className={sectionTitleClass}>App Colour Theme</h2>
           <p className={`mt-2 text-sm ${mutedTextClass}`}>
             Build your own colour palette for the app interface.
@@ -330,7 +457,10 @@ export default function SettingsPage() {
           />
         </section>
 
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section
+          className="rounded-xl border bg-white p-6 shadow-sm"
+          data-tutorial="settings-note-defaults"
+        >
           <h2 className="text-xl font-semibold text-gray-900">
             Note Defaults
           </h2>
@@ -457,7 +587,10 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section
+          className="rounded-xl border bg-white p-6 shadow-sm"
+          data-tutorial="settings-tutorial"
+        >
           <h2 className="text-xl font-semibold text-gray-900">
             Tutorial
           </h2>
@@ -484,7 +617,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className={cardClass}>
+        <section className={cardClass} data-tutorial="settings-feedback">
           <h2 className={sectionTitleClass}>Feedback Form</h2>
 
           <p className={`mt-2 text-sm ${mutedTextClass}`}>
@@ -564,6 +697,109 @@ export default function SettingsPage() {
               )}
             </div>
           </form>
+        </section>
+
+        <section className={cardClass}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className={sectionTitleClass}>Recently Deleted</h2>
+              <p className={`mt-2 text-sm ${mutedTextClass}`}>
+                Notes deleted will stay here for 30 days. After 30 days, the file
+                will be permanently deleted.
+              </p>
+            </div>
+
+            {data.recently_deleted.notes.length > 0 && (
+              <button
+                type="button"
+                className="rounded-lg bg-black px-4 py-2 text-sm text-white"
+                onClick={() =>
+                  setShowRecentlyDeletedNotes((current) => !current)
+                }
+              >
+                {showRecentlyDeletedNotes ? "Hide" : "View"}
+              </button>
+            )}
+          </div>
+
+          {data.recently_deleted.notes.length === 0 ? (
+            <p className={`mt-4 text-sm ${mutedTextClass}`}>
+              No recently deleted notes.
+            </p>
+          ) : (
+            showRecentlyDeletedNotes && (
+              <div className="mt-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className={isDark ? "flex items-center gap-2 text-sm text-slate-200" : "flex items-center gap-2 text-sm text-gray-700"}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedDeletedNoteIds.length ===
+                        data.recently_deleted.notes.length
+                      }
+                      onChange={toggleSelectAllDeletedNotes}
+                    />
+                    Select all
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={selectedDeletedNoteIds.length === 0}
+                      className="rounded-lg bg-black px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={handleRecoverDeletedNotes}
+                    >
+                      Recover
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedDeletedNoteIds.length === 0}
+                      className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={() => void handlePermanentlyDeleteNotes()}
+                    >
+                      Permanently Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  {data.recently_deleted.notes.map((note) => (
+                    <label
+                      key={note.id}
+                      className={
+                        selectedDeletedNoteIds.includes(note.id)
+                          ? isDark
+                            ? "flex cursor-pointer gap-3 rounded-xl border-2 border-blue-500 bg-slate-800 p-4"
+                            : "flex cursor-pointer gap-3 rounded-xl border-2 border-blue-500 bg-blue-50 p-4"
+                          : isDark
+                            ? "flex cursor-pointer gap-3 rounded-xl border border-slate-700 bg-slate-800 p-4"
+                            : "flex cursor-pointer gap-3 rounded-xl border bg-gray-50 p-4"
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDeletedNoteIds.includes(note.id)}
+                        onChange={() => toggleDeletedNoteSelection(note.id)}
+                      />
+                      <div className="min-w-0">
+                        <p className={isDark ? "truncate font-semibold text-slate-100" : "truncate font-semibold text-gray-900"}>
+                          {note.title}
+                        </p>
+                        <p className={`mt-1 text-xs ${mutedTextClass}`}>
+                          {getDeletedNoteDescription(note)}
+                        </p>
+                        <p className={`mt-1 text-xs ${mutedTextClass}`}>
+                          {(note.materials?.length ?? 0) > 0
+                            ? "Imported material"
+                            : "Normal note"}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )
+          )}
         </section>
 
         <section className="rounded-xl border bg-white p-6 shadow-sm">

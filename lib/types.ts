@@ -45,6 +45,9 @@ export type Note = {
   materials?: NoteMaterial[];
   page_bookmarks?: number[];
   page_count?: number;
+  deleted_at?: string;
+  deleted_from_subject_id?: string;
+  deleted_from_subject_name?: string;
   created_at: string;
   updated_at: string;
   position: number;

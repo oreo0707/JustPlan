@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { TutorialModal } from "@/components/TutorialModal";
 import {
@@ -35,16 +35,25 @@ export function TutorialController() {
   const pathname = usePathname();
   const tutorial = getTutorialForPathname(pathname);
   const [isOpen, setIsOpen] = useState(false);
+  const [completedSections, setCompletedSections] = useState<TutorialSection[]>(
+    []
+  );
   const section = tutorial?.section;
+  const hasCompletedCurrentSection = section
+    ? completedSections.includes(section)
+    : false;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
+      const completed = readCompletedSections();
+      setCompletedSections(completed);
+
       if (!section) {
         setIsOpen(false);
         return;
       }
 
-      setIsOpen(!readCompletedSections().includes(section));
+      setIsOpen(!completed.includes(section));
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -57,6 +66,7 @@ export function TutorialController() {
 
     function restartTutorials() {
       window.localStorage.removeItem(PROGRESS_KEY);
+      setCompletedSections([]);
       if (section) setIsOpen(true);
     }
 
@@ -69,10 +79,13 @@ export function TutorialController() {
     };
   }, [section]);
 
-  const closeTutorial = useCallback(() => {
-    if (section) rememberSection(section);
+  function closeTutorial() {
+    if (section) {
+      rememberSection(section);
+      setCompletedSections(readCompletedSections());
+    }
     setIsOpen(false);
-  }, [section]);
+  }
 
   if (!tutorial) return null;
 
@@ -81,7 +94,11 @@ export function TutorialController() {
       <button
         type="button"
         aria-label={`Open ${tutorial.label}`}
-        title={tutorial.label}
+        title={
+          hasCompletedCurrentSection
+            ? `Replay ${tutorial.label}`
+            : tutorial.label
+        }
         className="fixed bottom-5 right-5 z-[9997] flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-slate-50"
         onClick={() => setIsOpen(true)}
       >

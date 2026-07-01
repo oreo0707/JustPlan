@@ -45,12 +45,16 @@ export function TutorialModal({
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (!isOpen || !step?.target) return;
+    if (!isOpen || !step?.target) {
+      return;
+    }
 
     const selector = step.target;
     const target = document.querySelector<HTMLElement>(selector);
 
-    if (!target) return;
+    if (!target) {
+      return;
+    }
     const tutorialTarget = target;
 
     function isTargetInView() {
@@ -155,8 +159,6 @@ export function TutorialModal({
 
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === steps.length - 1;
-  const isTargetVisible = !step.target || anchor?.target === step.target;
-
   function handleNext() {
     if (isLastStep) {
       setCurrentStep(0);
@@ -177,10 +179,6 @@ export function TutorialModal({
   function handleSkip() {
     setCurrentStep(0);
     onClose();
-  }
-
-  if (!isTargetVisible) {
-    return null;
   }
 
   return (

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { NoteMaterial } from "@/lib/types";
-import { deleteStoredMaterial, loadStoredMaterial } from "@/lib/material-storage";
+import { loadStoredMaterial } from "@/lib/material-storage";
 
 type NoteCardProps = {
   subjectId: string;
@@ -43,6 +43,26 @@ function isWordMaterial(material: NoteMaterial) {
 
 function removeMaterialFileExtension(fileName: string) {
   return fileName.replace(/\.(pdf|docx?)$/i, "");
+}
+
+function getPdfViewerUrl(url: string) {
+  return `${url}#toolbar=1&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`;
+}
+
+function NativePdfViewer({
+  materialUrl,
+  title,
+}: {
+  materialUrl: string;
+  title: string;
+}) {
+  return (
+    <iframe
+      src={getPdfViewerUrl(materialUrl)}
+      title={title}
+      className="h-full w-full border-0 bg-white"
+    />
+  );
 }
 
 function PdfMaterialViewer({
@@ -198,6 +218,7 @@ export function NoteCard({
   const [draftTitle, setDraftTitle] = useState(title);
   const [showMaterialViewer, setShowMaterialViewer] = useState(false);
   const [materialUrl, setMaterialUrl] = useState("");
+  const [useTabletPdfViewer, setUseTabletPdfViewer] = useState(false);
 
   const material = materials[0] ?? null;
   const isMaterialNote = Boolean(material);
@@ -230,10 +251,20 @@ export function NoteCard({
     };
   }, [material]);
 
-  async function handleDeleteNote() {
-    await Promise.all(
-      materials.map((item) => deleteStoredMaterial(item.fileReference))
-    );
+  useEffect(() => {
+    function updateViewerMode() {
+      const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+      const compactWidth = window.matchMedia("(max-width: 900px)").matches;
+      setUseTabletPdfViewer(coarsePointer || compactWidth);
+    }
+
+    updateViewerMode();
+    window.addEventListener("resize", updateViewerMode);
+
+    return () => window.removeEventListener("resize", updateViewerMode);
+  }, []);
+
+  function handleDeleteNote() {
     onDelete();
   }
 
@@ -320,7 +351,7 @@ export function NoteCard({
           <button
             type="button"
             className="rounded-lg border px-3 py-1 text-sm text-red-500"
-            onClick={() => void handleDeleteNote()}
+            onClick={handleDeleteNote}
           >
             Delete
           </button>
@@ -351,10 +382,17 @@ export function NoteCard({
             }}
           >
             {materialUrl && isPdfMaterial(material) ? (
-              <PdfMaterialViewer
-                materialUrl={materialUrl}
-                title={material.name}
-              />
+              useTabletPdfViewer ? (
+                <PdfMaterialViewer
+                  materialUrl={materialUrl}
+                  title={material.name}
+                />
+              ) : (
+                <NativePdfViewer
+                  materialUrl={materialUrl}
+                  title={material.name}
+                />
+              )
             ) : materialUrl && isWordMaterial(material) ? (
               <div className="flex h-full items-center justify-center bg-white p-8 text-center">
                 <div>
