@@ -21,7 +21,7 @@ export type TutorialDefinition = {
 
 export const homeTutorialSteps: TutorialStep[] = [
   {
-    title: "Welcome to Just Note",
+    title: "Welcome to Just Plan",
     description:
       "Here is a quick tour of the main study tools. Each tip appears near the feature it explains.",
   },

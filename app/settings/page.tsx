@@ -157,7 +157,7 @@ export default function SettingsPage() {
 
   async function handleImportBackup(file: File) {
     const confirmed = window.confirm(
-      "Importing this backup will replace your current Just Study data. Continue?"
+      "Importing this backup will replace your current Just Plan data. Continue?"
     );
 
     if (!confirmed) return;
@@ -635,7 +635,7 @@ export default function SettingsPage() {
           <h2 className={sectionTitleClass}>Feedback Form</h2>
 
           <p className={`mt-2 text-sm ${mutedTextClass}`}>
-            Tell us how do you feel using Just Note.
+            Tell us how do you feel using Just Plan.
           </p>
 
           <form className="mt-4 space-y-4" onSubmit={handleSubmitFeedback}>

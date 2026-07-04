@@ -4,9 +4,15 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-function buildStudyPrompt(body: any) {
+type StudySummaryRequestBody = {
+  allowedSubjectNames?: string[];
+  factualSummary?: string;
+  activeStatistic?: string;
+};
+
+function buildStudyPrompt(body: StudySummaryRequestBody) {
   return `
-You are the AI Study Coach for Just Study, a cozy student planner app.
+You are the AI Study Coach for Just Plan, a cozy student planner app.
 
 You must follow these rules strictly:
 - Only use the facts provided in the factual summary.
@@ -18,13 +24,13 @@ You must follow these rules strictly:
 - If there is not enough data, say there is not enough planned task data yet.
 
 Allowed subject names:
-${JSON.stringify(body.allowedSubjectNames, null, 2)}
+${JSON.stringify(body.allowedSubjectNames ?? [], null, 2)}
 
 Factual summary:
-${body.factualSummary}
+${body.factualSummary ?? ""}
 
 The user is currently viewing:
-${body.activeStatistic}
+${body.activeStatistic ?? "Statistics"}
 
 Write a friendly study suggestion.
 

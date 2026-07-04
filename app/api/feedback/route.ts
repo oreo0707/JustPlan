@@ -43,7 +43,7 @@ function buildWebhookText(feedback: {
   createdAt: string;
 }) {
   return [
-    "New anonymous Just Study feedback",
+    "New anonymous Just Plan feedback",
     `Category: ${feedback.category}`,
     `Rating: ${feedback.rating ?? "Not provided"}`,
     `Page: ${feedback.page || "Settings"}`,
@@ -78,7 +78,7 @@ async function sendToWebhook(feedback: {
     : isSlackWebhook
       ? { text: webhookText }
       : {
-          type: "just-study-feedback",
+          type: "just-plan-feedback",
           ...feedback,
         };
 

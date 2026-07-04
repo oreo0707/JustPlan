@@ -71,7 +71,7 @@ useEffect(() => {
       <aside
         className="h-screen w-64 shrink-0 border-r p-6"
       >
-        <h1 className="text-2xl font-bold">Just Note</h1>
+        <h1 className="text-2xl font-bold">Just Plan</h1>
 
         <nav className="mt-8 flex flex-col gap-2">
           <Link

@@ -75,7 +75,7 @@ export function exportDataFile(data: AppData) {
 
   const link = document.createElement("a");
   link.href = url;
-  link.download = `just-study-backup-${date}.json`;
+  link.download = `just-plan-backup-${date}.json`;
 
   document.body.appendChild(link);
   link.click();
@@ -100,7 +100,7 @@ export function importDataFile(file: File): Promise<AppData> {
         const parsed = JSON.parse(result) as AppData;
 
         if (!parsed.subjects || !parsed.settings) {
-          reject(new Error("This does not look like a Just Study backup file."));
+          reject(new Error("This does not look like a Just Plan backup file."));
           return;
         }
 
