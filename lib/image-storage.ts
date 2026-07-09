@@ -43,6 +43,24 @@ export async function storeImageDataUrl(dataUrl: string) {
   return `${REFERENCE_PREFIX}${id}`;
 }
 
+export async function duplicateStoredImage(reference: string) {
+  const blob = await loadStoredImage(reference);
+  if (!blob) return reference;
+
+  const database = await openImageDatabase();
+  const id = crypto.randomUUID();
+
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).put(blob, id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+
+  database.close();
+  return `${REFERENCE_PREFIX}${id}`;
+}
+
 export async function loadStoredImage(reference: string) {
   const id = getImageId(reference);
   if (!id) return null;

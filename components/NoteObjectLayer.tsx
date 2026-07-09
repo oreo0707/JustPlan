@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DrawingPoint, NoteObject, ShapeVertex } from "@/lib/types";
 import { StoredImage } from "@/components/StoredImage";
-import { deleteStoredImage } from "@/lib/image-storage";
+import { deleteStoredImage, duplicateStoredImage } from "@/lib/image-storage";
 
 type NoteObjectLayerProps = {
   objects: NoteObject[];
@@ -443,6 +443,7 @@ export function NoteObjectLayer({
   const objectHandleClass = isDark
     ? "border-slate-500 bg-slate-900 shadow-sm"
     : "border bg-white shadow-sm";
+
   const textBoxMenuClass = isDark
     ? "pointer-events-auto absolute -top-7 left-24 z-50 flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
     : "pointer-events-auto absolute -top-7 left-24 z-50 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg";
@@ -454,6 +455,39 @@ export function NoteObjectLayer({
   function clampValue(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
   }
+
+  function getLayerPointFromClient(clientX: number, clientY: number) {
+    const layerBounds = layerRef.current?.getBoundingClientRect();
+
+    if (!layerBounds) return objectClipboardAnchor;
+
+    return {
+      x: clampValue(clientX - layerBounds.left, 0, pageWidth),
+      y: clampValue(clientY - layerBounds.top, 0, drawingHeight),
+    };
+  }
+
+  useEffect(() => {
+    if (objectClipboard.length === 0) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      const layerBounds = layerRef.current?.getBoundingClientRect();
+      if (!layerBounds) return;
+
+      setObjectClipboardAnchor({
+        x: clampValue(event.clientX - layerBounds.left, 0, pageWidth),
+        y: clampValue(event.clientY - layerBounds.top, 0, drawingHeight),
+      });
+    }
+
+    window.addEventListener("pointermove", handlePointerMove, {
+      passive: true,
+    });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+    };
+  }, [drawingHeight, objectClipboard.length, pageWidth]);
 
   function clampPosition(x: number, y: number, width: number, height: number) {
     return {
@@ -1245,6 +1279,75 @@ export function NoteObjectLayer({
     });
   }
 
+  function cloneObjectsAtPoint(
+    sourceObjects: NoteObject[],
+    point: DrawingPoint
+  ) {
+    if (!sourceObjects.length) return [];
+
+    const sourceBounds = sourceObjects.map(getObjectBounds);
+    const left = Math.min(...sourceBounds.map((box) => box.left));
+    const top = Math.min(...sourceBounds.map((box) => box.top));
+    const right = Math.max(...sourceBounds.map((box) => box.left + box.width));
+    const bottom = Math.max(...sourceBounds.map((box) => box.top + box.height));
+    const bounds = {
+      left,
+      top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+    };
+    const moveDelta = clampMoveDelta(
+      bounds,
+      point.x - bounds.left,
+      point.y - bounds.top
+    );
+
+    return sourceObjects.map((object, index) => {
+      const duplicateId = getDuplicateId(object, index);
+
+      if (object.type === "line") {
+        const points = getLinePoints(object);
+
+        return {
+          ...object,
+          id: duplicateId,
+          x: points.startX + moveDelta.dx,
+          y: points.startY + moveDelta.dy,
+          endX: points.endX + moveDelta.dx,
+          endY: points.endY + moveDelta.dy,
+        };
+      }
+
+      return {
+        ...object,
+        id: duplicateId,
+        ...clampPosition(
+          object.x + moveDelta.dx,
+          object.y + moveDelta.dy,
+          object.width,
+          object.height
+        ),
+      };
+    });
+  }
+
+  async function duplicateImageSourcesForPaste(sourceObjects: NoteObject[]) {
+    return Promise.all(
+      sourceObjects.map(async (object) => {
+        if (object.type !== "image" || !object.src) return object;
+
+        try {
+          return {
+            ...object,
+            src: await duplicateStoredImage(object.src),
+          };
+        } catch {
+          return object;
+        }
+      })
+    );
+  }
+
   function deleteSelectedObjects() {
     if (selectedObjectIds.length === 0) return;
 
@@ -1301,18 +1404,19 @@ export function NoteObjectLayer({
     );
   }
 
-  function pasteObjectClipboard() {
+  async function pasteObjectClipboard(pastePoint?: DrawingPoint | null) {
     if (!objectClipboard.length) return;
 
-    const pastedObjects = cloneObjectsWithOffset(objectClipboard, 24);
+    const clipboardObjects = await duplicateImageSourcesForPaste(objectClipboard);
+    const targetPoint = pastePoint ?? objectClipboardAnchor;
+    const pastedObjects = targetPoint
+      ? cloneObjectsAtPoint(clipboardObjects, targetPoint)
+      : cloneObjectsWithOffset(clipboardObjects, 24);
     onChangeObjects([...objects, ...pastedObjects]);
     onSelectionChange(pastedObjects.map((object) => object.id));
 
-    const pastedBounds = pastedObjects.map(getObjectBounds);
-    const left = Math.min(...pastedBounds.map((box) => box.left));
-    const bottom = Math.max(...pastedBounds.map((box) => box.top + box.height));
-    setObjectClipboardAnchor({ x: left, y: bottom });
-    setObjectClipboard(pastedObjects);
+    setObjectClipboardAnchor(null);
+    setObjectClipboard([]);
   }
 
   function reorderSelectedObjects(direction: LayerDirection) {
@@ -1415,7 +1519,10 @@ export function NoteObjectLayer({
           renderSelectionActionButton(
             "Paste",
             "Paste copied or cut objects",
-            pasteObjectClipboard
+            (event) =>
+              pasteObjectClipboard(
+                getLayerPointFromClient(event.clientX, event.clientY)
+              )
           )}
         {renderSelectionActionButton(
           "Delete",
@@ -1478,7 +1585,7 @@ export function NoteObjectLayer({
   function renderSelectionActionButton(
     label: string,
     title: string,
-    action: () => void
+    action: (event: React.MouseEvent<HTMLButtonElement>) => void
   ) {
     return (
       <button
@@ -1492,7 +1599,7 @@ export function NoteObjectLayer({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          action();
+          action(event);
         }}
       >
         {label}
@@ -1788,31 +1895,115 @@ export function NoteObjectLayer({
     const pointerX = event.clientX;
     const pointerY = event.clientY;
     const originalCrop = getImageCrop(object);
+    const visibleWidth = Math.max(
+      0.1,
+      1 - originalCrop.left - originalCrop.right
+    );
+    const visibleHeight = Math.max(
+      0.1,
+      1 - originalCrop.top - originalCrop.bottom
+    );
+    const fullImageWidth = object.width / visibleWidth;
+    const fullImageHeight = object.height / visibleHeight;
+    const minVisibleWidth = Math.min(24, Math.max(1, fullImageWidth * 0.25));
+    const minVisibleHeight = Math.min(24, Math.max(1, fullImageHeight * 0.25));
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const dx = (moveEvent.clientX - pointerX) / Math.max(1, object.width);
-      const dy = (moveEvent.clientY - pointerY) / Math.max(1, object.height);
+      const rawDx = moveEvent.clientX - pointerX;
+      const rawDy = moveEvent.clientY - pointerY;
       const nextCrop = { ...originalCrop };
+      let nextX = object.x;
+      let nextY = object.y;
+      let nextWidth = object.width;
+      let nextHeight = object.height;
 
       if (side === "left") {
-        nextCrop.left = clampCropSide(originalCrop.left + dx, originalCrop.right);
+        const maxDx =
+          (1 -
+            originalCrop.right -
+            minVisibleWidth / fullImageWidth -
+            originalCrop.left) *
+          fullImageWidth;
+        const minDx = Math.max(-originalCrop.left * fullImageWidth, -object.x);
+        const dx = clampValue(rawDx, minDx, maxDx);
+
+        nextCrop.left = clampCropSide(
+          originalCrop.left + dx / fullImageWidth,
+          originalCrop.right
+        );
+        nextX = object.x + dx;
+        nextWidth = object.width - dx;
       }
 
       if (side === "right") {
-        nextCrop.right = clampCropSide(originalCrop.right - dx, originalCrop.left);
+        const minDx =
+          -(
+            1 -
+            originalCrop.left -
+            minVisibleWidth / fullImageWidth -
+            originalCrop.right
+          ) * fullImageWidth;
+        const maxDx = Math.min(
+          originalCrop.right * fullImageWidth,
+          pageWidth - (object.x + object.width)
+        );
+        const dx = clampValue(rawDx, minDx, maxDx);
+
+        nextCrop.right = clampCropSide(
+          originalCrop.right - dx / fullImageWidth,
+          originalCrop.left
+        );
+        nextWidth = object.width + dx;
       }
 
       if (side === "top") {
-        nextCrop.top = clampCropSide(originalCrop.top + dy, originalCrop.bottom);
+        const maxDy =
+          (1 -
+            originalCrop.bottom -
+            minVisibleHeight / fullImageHeight -
+            originalCrop.top) *
+          fullImageHeight;
+        const minDy = Math.max(-originalCrop.top * fullImageHeight, -object.y);
+        const dy = clampValue(rawDy, minDy, maxDy);
+
+        nextCrop.top = clampCropSide(
+          originalCrop.top + dy / fullImageHeight,
+          originalCrop.bottom
+        );
+        nextY = object.y + dy;
+        nextHeight = object.height - dy;
       }
 
       if (side === "bottom") {
-        nextCrop.bottom = clampCropSide(originalCrop.bottom - dy, originalCrop.top);
+        const minDy =
+          -(
+            1 -
+            originalCrop.top -
+            minVisibleHeight / fullImageHeight -
+            originalCrop.bottom
+          ) * fullImageHeight;
+        const maxDy = Math.min(
+          originalCrop.bottom * fullImageHeight,
+          drawingHeight - (object.y + object.height)
+        );
+        const dy = clampValue(rawDy, minDy, maxDy);
+
+        nextCrop.bottom = clampCropSide(
+          originalCrop.bottom - dy / fullImageHeight,
+          originalCrop.top
+        );
+        nextHeight = object.height + dy;
       }
 
-      updateObject(object.id, { crop: nextCrop });
+      updateObject(object.id, {
+        x: nextX,
+        y: nextY,
+        width: Math.max(1, nextWidth),
+        height: Math.max(1, nextHeight),
+        crop: nextCrop,
+      });
     }
 
     function handleUp() {
@@ -2651,6 +2842,7 @@ export function NoteObjectLayer({
     : null;
   const shouldLockEraserScroll =
     isEraserScrollLocked && drawingMode && drawingTool === "erase";
+  const isPasteMode = objectClipboard.length > 0;
   const canDuplicateGroupSelection = objects.some(
     (object) =>
       selectedObjectIds.includes(object.id) && canDuplicateObject(object)
@@ -2660,11 +2852,13 @@ export function NoteObjectLayer({
     <div
       ref={layerRef}
       className={
-        selectionMode || drawingMode
+        selectionMode || drawingMode || isPasteMode
           ? `pointer-events-auto absolute inset-0 z-20 select-none ${
               drawingMode && drawingTool === "erase"
                 ? "cursor-cell"
-                : "cursor-crosshair"
+                : isPasteMode && !drawingMode && !selectionMode
+                  ? "cursor-copy"
+                  : "cursor-crosshair"
             }`
           : "pointer-events-none absolute inset-0 z-20"
       }
@@ -2676,6 +2870,15 @@ export function NoteObjectLayer({
         overscrollBehavior: shouldLockEraserScroll ? "none" : "auto",
       }}
       onPointerDown={(event) => {
+        if (isPasteMode && !drawingMode && !selectionMode) {
+          event.preventDefault();
+          event.stopPropagation();
+          pasteObjectClipboard(
+            getLayerPointFromClient(event.clientX, event.clientY)
+          );
+          return;
+        }
+
         if (drawingMode) {
           if (!isDrawingPointer(event)) {
             return;
@@ -2954,7 +3157,7 @@ export function NoteObjectLayer({
                 {selected && hasSingleSelection && (
                   <>
                     <div
-                      className="absolute -top-7 left-8 rounded-md bg-black px-2 py-1 text-xs text-white"
+                      className="absolute -top-7 left-0 rounded-md bg-black px-2 py-1 text-xs text-white"
                       onPointerDown={(event) => startDrag(event, object)}
                     >
                       Move
@@ -3411,7 +3614,10 @@ export function NoteObjectLayer({
               renderSelectionActionButton(
                 "Paste",
                 "Paste copied or cut objects",
-                pasteObjectClipboard
+                (event) =>
+                  pasteObjectClipboard(
+                    getLayerPointFromClient(event.clientX, event.clientY)
+                  )
               )}
             {renderSelectionActionButton(
               "Delete",
@@ -3424,18 +3630,18 @@ export function NoteObjectLayer({
 
       {!selectedGroupBounds && objectClipboard.length > 0 && objectClipboardAnchor && (
         <div
-          className={selectionActionPanelClass}
+          className={
+            isDark
+              ? "pointer-events-none absolute z-50 rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm"
+              : "pointer-events-none absolute z-50 rounded-full border bg-white px-2 py-1 text-xs text-gray-700 shadow-sm"
+          }
           style={{
             left: objectClipboardAnchor.x + 8,
             top: objectClipboardAnchor.y + 8,
             zIndex: 80,
           }}
         >
-          {renderSelectionActionButton(
-            "Paste",
-            "Paste cut objects",
-            pasteObjectClipboard
-          )}
+          Click to paste
         </div>
       )}
 
