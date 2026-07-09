@@ -232,32 +232,6 @@ Normal users do not need to run these commands. They only need the hosted app li
 
 ---
 
-## Environment Variables
-
-Just Plan uses the Gemini API for AI study suggestions.
-
-For local development, create a `.env.local` file in the project root:
-
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-The `.env.local` file should not be committed to GitHub.
-
-For the hosted version, the same environment variable should be added in the Vercel project settings.
-
----
-
-## Backup and Restore
-
-Just Plan includes import and export features to help users manage their data.
-
-Users can export their data as a backup file and import it again later. This is useful when moving to another device or browser.
-
-Because the app currently uses browser localStorage, users are encouraged to export backups regularly.
-
----
-
 ## Project Status
 
 Just Plan is currently a hosted web application used for testing, feedback, and feature development.
