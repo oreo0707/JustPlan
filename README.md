@@ -203,41 +203,32 @@ Possible future improvements include:
 
 ---
 
-## Getting Started
+## Using the Hosted App
 
-To run Just Plan locally, clone the repository and install the dependencies.
+Normal users and testers can access Just Plan through the live demo link without installing any dependencies or creating an account.
+
+The app runs in the browser, and user data is stored locally using browser localStorage.
+
+---
+
+## Development Notes
+
+This project is built with Next.js, React, TypeScript, and Tailwind CSS.
+
+To run the project locally for development:
 
 ```bash
 npm install
-```
-
-Then start the development server:
-
-```bash
 npm run dev
 ```
 
-Open the app in your browser:
+Then open:
 
 ```txt
 http://localhost:3000
 ```
 
----
-
-## Build
-
-To create a production build:
-
-```bash
-npm run build
-```
-
-To start the production build locally:
-
-```bash
-npm run start
-```
+Normal users do not need to run these commands. They only need the hosted app link.
 
 ---
 
@@ -245,7 +236,7 @@ npm run start
 
 Just Plan uses the Gemini API for AI study suggestions.
 
-Create a `.env.local` file in the project root and add:
+For local development, create a `.env.local` file in the project root:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -253,15 +244,15 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 The `.env.local` file should not be committed to GitHub.
 
-For deployment on Vercel, the same environment variable should be added in the Vercel project settings.
+For the hosted version, the same environment variable should be added in the Vercel project settings.
 
 ---
 
 ## Backup and Restore
 
-Just Plan includes an import and export feature to help users manage their data.
+Just Plan includes import and export features to help users manage their data.
 
-Users can export their data as a backup file and import it again later. This is especially useful when moving to another device or browser.
+Users can export their data as a backup file and import it again later. This is useful when moving to another device or browser.
 
 Because the app currently uses browser localStorage, users are encouraged to export backups regularly.
 
