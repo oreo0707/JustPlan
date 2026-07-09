@@ -13,7 +13,7 @@ The app is currently hosted online. Users do not need an account, and the app ca
 The hosted version of Just Plan can be accessed here:
 
 ```txt
-Add your Vercel link here
+https://just-plan-two.vercel.app
 ```
 
 ---
