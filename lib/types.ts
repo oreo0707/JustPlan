@@ -113,6 +113,7 @@ export type NoteObject = {
 
   flipX?: boolean;
   flipY?: boolean;
+  rotation?: number;
 };
 
 export type TextBox = {

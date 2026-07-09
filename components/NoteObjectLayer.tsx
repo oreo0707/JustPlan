@@ -1884,6 +1884,43 @@ export function NoteObjectLayer({
     window.addEventListener("pointerup", handleUp);
   }
 
+  function startRotate(
+    event: React.PointerEvent<HTMLDivElement>,
+    object: NoteObject
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange([object.id]);
+
+    const centerX = object.x + object.width / 2;
+    const centerY = object.y + object.height / 2;
+    const startAngle =
+      Math.atan2(event.clientY - centerY, event.clientX - centerX) *
+      (180 / Math.PI);
+    const originalRotation = object.rotation ?? 0;
+
+    function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
+      const currentAngle =
+        Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX) *
+        (180 / Math.PI);
+      const nextRotation = (originalRotation + currentAngle - startAngle) % 360;
+
+      updateObject(object.id, {
+        rotation: Math.round(nextRotation),
+      });
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
   function startImageCrop(
     event: React.PointerEvent<HTMLDivElement>,
     object: NoteObject,
@@ -3138,9 +3175,10 @@ export function NoteObjectLayer({
               touchAction: object.type === "textbox" ? "auto" : "none",
               WebkitUserSelect: object.type === "textbox" ? undefined : "none",
               userSelect: object.type === "textbox" ? undefined : "none",
-              transform: `scale(${object.flipX ? -1 : 1}, ${
+              transform: `rotate(${object.rotation ?? 0}deg) scale(${object.flipX ? -1 : 1}, ${
                 object.flipY ? -1 : 1
               })`,
+              transformOrigin: "center",
             }}
             onPointerDown={(event) => {
               if (object.type === "textbox") {
@@ -3488,6 +3526,18 @@ export function NoteObjectLayer({
             {selected && hasSingleSelection && (
               <>
                 {renderActionToolbar()}
+
+                <div
+                  className={`absolute -right-5 -top-5 flex h-7 w-7 touch-none cursor-grab items-center justify-center rounded-full border-2 border-blue-600 text-sm leading-none shadow-sm ${
+                    isDark
+                      ? "bg-slate-900 text-slate-100"
+                      : "bg-white text-gray-800"
+                  }`}
+                  title="Rotate"
+                  onPointerDown={(event) => startRotate(event, object)}
+                >
+                  ↻
+                </div>
 
                 {(object.type === "image" || object.type === "sticker") && (
                   <>

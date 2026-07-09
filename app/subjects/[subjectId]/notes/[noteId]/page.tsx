@@ -2090,9 +2090,10 @@ function addTextBox() {
                 top: (object.y - pageTop) * thumbnailScale,
                 width: Math.max(3, object.width * thumbnailScale),
                 height: Math.max(3, object.height * thumbnailScale),
-                transform: `scale(${object.flipX ? -1 : 1}, ${
+                transform: `rotate(${object.rotation ?? 0}deg) scale(${object.flipX ? -1 : 1}, ${
                   object.flipY ? -1 : 1
                 })`,
+                transformOrigin: "center",
               }}
             >
               {object.type === "textbox" && (
