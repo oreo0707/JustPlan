@@ -262,6 +262,7 @@ Possible future improvements include:
 * Optional cloud sync
 * Improved AI fallback system
 * More advanced statistics and study insights
+* Further polish the note editor to make the note-taking experience easier, smoother, and more convenient for both desktop/laptop and tablet users.
 
 ---
 
