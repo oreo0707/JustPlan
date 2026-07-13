@@ -754,6 +754,8 @@ export default function NoteEditorPage() {
         return;
       }
 
+      event.preventDefault();
+
       const distance = getTouchDistance(event.touches);
       const center = getTouchCenter(event.touches);
       const containerBounds = activeScrollContainer.getBoundingClientRect();
@@ -780,6 +782,8 @@ export default function NoteEditorPage() {
 
       const gesture = tabletGestureRef.current;
       if (!gesture || event.touches.length !== gesture.touchCount) return;
+
+      event.preventDefault();
 
       const center = getTouchCenter(event.touches);
       gesture.maxMove = Math.max(
@@ -2476,7 +2480,7 @@ function addTextBox() {
     <main
       ref={scrollContainerRef}
       className={notePageClass}
-      style={{ touchAction: "pan-y pinch-zoom" }}
+      style={{ touchAction: "pan-y" }}
     >
       <Link
         href={`/subjects/${subjectId}`}

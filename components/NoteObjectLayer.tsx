@@ -3519,7 +3519,7 @@ export function NoteObjectLayer({
       }
       style={{
         touchAction:
-          shouldLockEraserScroll || selectionMode ? "none" : "pan-y pinch-zoom",
+          shouldLockEraserScroll || selectionMode ? "none" : "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
@@ -3560,7 +3560,7 @@ export function NoteObjectLayer({
           style={{
             width: pageWidth,
             height: drawingHeight,
-            touchAction: "pan-y pinch-zoom",
+            touchAction: "pan-y",
             WebkitUserSelect: "none",
             userSelect: "none",
             WebkitTouchCallout: "none",
