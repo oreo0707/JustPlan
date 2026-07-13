@@ -715,6 +715,13 @@ export default function NoteEditorPage() {
     if (!scrollContainer) return;
     const activeScrollContainer = scrollContainer;
     const activeTouchPointers = activeTouchPointersRef.current;
+    let safariGestureState: {
+      zoom: number;
+      centerX: number;
+      centerY: number;
+      scrollLeft: number;
+      scrollTop: number;
+    } | null = null;
 
     function getPointerPair() {
       const pointers = Array.from(activeTouchPointers.values());
@@ -847,6 +854,83 @@ export default function NoteEditorPage() {
       }
     }
 
+    function getSafariGesturePoint(event: Event) {
+      const gestureEvent = event as Event & {
+        clientX?: number;
+        clientY?: number;
+      };
+      const containerBounds = activeScrollContainer.getBoundingClientRect();
+      const clientX =
+        typeof gestureEvent.clientX === "number"
+          ? gestureEvent.clientX
+          : containerBounds.left + containerBounds.width / 2;
+      const clientY =
+        typeof gestureEvent.clientY === "number"
+          ? gestureEvent.clientY
+          : containerBounds.top + containerBounds.height / 2;
+
+      return {
+        x: clientX - containerBounds.left,
+        y: clientY - containerBounds.top,
+      };
+    }
+
+    function handleSafariGestureStart(event: Event) {
+      if (
+        !(event.target instanceof Node) ||
+        !activeScrollContainer.contains(event.target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const center = getSafariGesturePoint(event);
+      safariGestureState = {
+        zoom: noteZoom,
+        centerX: center.x,
+        centerY: center.y,
+        scrollLeft: activeScrollContainer.scrollLeft,
+        scrollTop: activeScrollContainer.scrollTop,
+      };
+    }
+
+    function handleSafariGestureChange(event: Event) {
+      if (!safariGestureState) return;
+
+      const gestureEvent = event as Event & { scale?: number };
+      const scale = typeof gestureEvent.scale === "number" ? gestureEvent.scale : 1;
+      if (scale <= 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const nextZoom = clampZoom(safariGestureState.zoom * scale);
+      const zoomRatio = nextZoom / Math.max(0.01, safariGestureState.zoom);
+
+      setNoteZoom(nextZoom);
+
+      window.requestAnimationFrame(() => {
+        if (!safariGestureState) return;
+
+        activeScrollContainer.scrollLeft =
+          (safariGestureState.scrollLeft + safariGestureState.centerX) *
+            zoomRatio -
+          safariGestureState.centerX;
+        activeScrollContainer.scrollTop =
+          (safariGestureState.scrollTop + safariGestureState.centerY) *
+            zoomRatio -
+          safariGestureState.centerY;
+      });
+    }
+
+    function handleSafariGestureEnd() {
+      safariGestureState = null;
+    }
+
     window.addEventListener("pointerdown", handlePointerDown, {
       passive: false,
       capture: true,
@@ -861,10 +945,22 @@ export default function NoteEditorPage() {
     window.addEventListener("pointercancel", handlePointerEnd, {
       capture: true,
     });
+    window.addEventListener("gesturestart", handleSafariGestureStart, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("gesturechange", handleSafariGestureChange, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("gestureend", handleSafariGestureEnd, {
+      capture: true,
+    });
 
     return () => {
       activeTouchPointers.clear();
       tabletGestureRef.current = null;
+      safariGestureState = null;
 
       window.removeEventListener("pointerdown", handlePointerDown, {
         capture: true,
@@ -876,6 +972,15 @@ export default function NoteEditorPage() {
         capture: true,
       });
       window.removeEventListener("pointercancel", handlePointerEnd, {
+        capture: true,
+      });
+      window.removeEventListener("gesturestart", handleSafariGestureStart, {
+        capture: true,
+      });
+      window.removeEventListener("gesturechange", handleSafariGestureChange, {
+        capture: true,
+      });
+      window.removeEventListener("gestureend", handleSafariGestureEnd, {
         capture: true,
       });
     };
