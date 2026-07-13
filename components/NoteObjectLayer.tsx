@@ -1257,7 +1257,9 @@ export function NoteObjectLayer({
     const nextObjects = [...objectsRef.current, recognizedObject];
     objectsRef.current = nextObjects;
     onChangeObjectsRef.current(nextObjects);
-    onSelectionChangeRef.current([recognizedObject.id]);
+    onSelectionChangeRef.current(
+      recognizedObject.type === "line" ? [] : [recognizedObject.id]
+    );
     setRecognizedShapeMenu(null);
   }
 
@@ -2720,14 +2722,34 @@ export function NoteObjectLayer({
     event.stopPropagation();
     onSelectionChange([object.id]);
 
-    const centerX = object.x + object.width / 2;
-    const centerY = object.y + object.height / 2;
+    const linePointsForCenter =
+      object.type === "line" ? getLinePoints(object) : null;
+    const centerX = linePointsForCenter
+      ? (linePointsForCenter.startX + linePointsForCenter.endX) / 2
+      : object.x + object.width / 2;
+    const centerY = linePointsForCenter
+      ? (linePointsForCenter.startY + linePointsForCenter.endY) / 2
+      : object.y + object.height / 2;
     const startPoint = getLayerPointFromClient(event.clientX, event.clientY);
     if (!startPoint) return;
 
     const startAngle =
       Math.atan2(startPoint.y - centerY, startPoint.x - centerX) * (180 / Math.PI);
     const originalRotation = object.rotation ?? 0;
+    const originalLinePoints = linePointsForCenter;
+
+    function rotateLinePoint(point: DrawingPoint, degrees: number) {
+      const radians = degrees * (Math.PI / 180);
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const dx = point.x - centerX;
+      const dy = point.y - centerY;
+
+      return {
+        x: centerX + dx * cos - dy * sin,
+        y: centerY + dx * sin + dy * cos,
+      };
+    }
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
@@ -2742,6 +2764,28 @@ export function NoteObjectLayer({
         Math.atan2(currentPoint.y - centerY, currentPoint.x - centerX) *
         (180 / Math.PI);
       const nextRotation = (originalRotation + currentAngle - startAngle) % 360;
+
+      if (originalLinePoints) {
+        const deltaRotation = currentAngle - startAngle;
+        const nextStart = rotateLinePoint(
+          { x: originalLinePoints.startX, y: originalLinePoints.startY },
+          deltaRotation
+        );
+        const nextEnd = rotateLinePoint(
+          { x: originalLinePoints.endX, y: originalLinePoints.endY },
+          deltaRotation
+        );
+
+        updateObject(object.id, {
+          x: clampValue(nextStart.x, 0, pageWidth),
+          y: clampValue(nextStart.y, 0, drawingHeight),
+          endX: clampValue(nextEnd.x, 0, pageWidth),
+          endY: clampValue(nextEnd.y, 0, drawingHeight),
+          width: Math.max(1, Math.abs(nextEnd.x - nextStart.x)),
+          height: Math.max(1, Math.abs(nextEnd.y - nextStart.y)),
+        });
+        return;
+      }
 
       updateObject(object.id, {
         rotation: Math.round(nextRotation),
@@ -3797,7 +3841,8 @@ export function NoteObjectLayer({
       ? objects.find(
           (object) =>
             object.id === selectedObjectIds[0] &&
-            isRecognizedDrawingShape(object)
+            isRecognizedDrawingShape(object) &&
+            object.type !== "line"
         )
       : undefined;
   const selectedRecognizedShapeBounds = selectedRecognizedShape
@@ -3964,6 +4009,10 @@ export function NoteObjectLayer({
         if (object.type === "line") {
           const points = getLinePoints(object);
           const lineStrokeWidth = object.strokeWidth ?? 5;
+          const showRecognizedLineControls =
+            selected && isRecognizedShape && !selectionMode;
+          const lineMidX = (points.startX + points.endX) / 2;
+          const lineMidY = (points.startY + points.endY) / 2;
 
           return (
             <div
@@ -4153,6 +4202,169 @@ export function NoteObjectLayer({
                         : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
                     }
                     style={{ left: points.endX, top: points.endY, touchAction: "none" }}
+                    title="Move line end point"
+                    onPointerDown={(event) =>
+                      startLineEndpointDrag(event, object, "end")
+                    }
+                  />
+                </>
+              )}
+              {showRecognizedLineControls && (
+                <>
+                  <button
+                    type="button"
+                    className={`pointer-events-auto absolute flex h-8 w-8 touch-none items-center justify-center rounded-full border-2 border-blue-600 text-sm shadow-sm ${
+                      isDark
+                        ? "bg-slate-900 text-slate-100"
+                        : "bg-white text-gray-800"
+                    }`}
+                    title="Line options"
+                    style={{
+                      left: lineMidX + 12,
+                      top: lineMidY - 40,
+                      zIndex: 84,
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setRecognizedShapeMenu((current) =>
+                        current === "actions" ? null : "actions"
+                      );
+                    }}
+                  >
+                    ⋯
+                  </button>
+
+                  {recognizedShapeMenu === "actions" && (
+                    <div
+                      className={selectionActionPanelClass}
+                      style={{
+                        left: lineMidX + 52,
+                        top: lineMidY - 40,
+                        zIndex: 85,
+                      }}
+                    >
+                      {renderSelectionActionButton(
+                        "Style",
+                        "Style selected line",
+                        () => setRecognizedShapeMenu("style")
+                      )}
+                      {renderSelectionActionButton(
+                        "Duplicate",
+                        "Duplicate selected line",
+                        duplicateSelectedObjects
+                      )}
+                      {renderSelectionActionButton(
+                        "Cut",
+                        "Cut selected line",
+                        cutSelectedObjects
+                      )}
+                      {renderSelectionActionButton(
+                        "Copy",
+                        "Copy selected line",
+                        copySelectedObjects
+                      )}
+                      {renderSelectionActionButton(
+                        "Delete",
+                        "Delete selected line",
+                        deleteSelectedObjects
+                      )}
+                    </div>
+                  )}
+
+                  {recognizedShapeMenu === "style" && (
+                    <div
+                      className={selectionActionPanelClass}
+                      style={{
+                        left: lineMidX + 52,
+                        top: lineMidY - 40,
+                        zIndex: 85,
+                        width: 190,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className={`${objectControlButtonClass} text-left`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setRecognizedShapeMenu("actions");
+                        }}
+                      >
+                        ← Options
+                      </button>
+                      <label
+                        className={
+                          isDark
+                            ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
+                            : "flex flex-col gap-1 px-2 py-1 text-gray-700"
+                        }
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        Thickness: {lineStrokeWidth}px
+                        <input
+                          type="range"
+                          min="1"
+                          max="36"
+                          value={lineStrokeWidth}
+                          className="w-full"
+                          onChange={(event) =>
+                            updateObject(object.id, {
+                              strokeWidth: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label
+                        className={
+                          isDark
+                            ? "flex items-center justify-between gap-2 px-2 py-1 text-slate-100"
+                            : "flex items-center justify-between gap-2 px-2 py-1 text-gray-700"
+                        }
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        Color
+                        <input
+                          type="color"
+                          value={object.color ?? "#111827"}
+                          className="h-8 w-10 rounded border"
+                          onChange={(event) =>
+                            updateObject(object.id, {
+                              color: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <div
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    }
+                    style={{ left: points.startX, top: points.startY, touchAction: "none", zIndex: 84 }}
+                    title="Move line start point"
+                    onPointerDown={(event) =>
+                      startLineEndpointDrag(event, object, "start")
+                    }
+                  />
+                  <div
+                    className={
+                      isDark
+                        ? "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-500 bg-slate-900 shadow-sm"
+                        : "pointer-events-auto absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 touch-none cursor-crosshair rounded-full border-2 border-blue-600 bg-white shadow-sm"
+                    }
+                    style={{ left: points.endX, top: points.endY, touchAction: "none", zIndex: 84 }}
                     title="Move line end point"
                     onPointerDown={(event) =>
                       startLineEndpointDrag(event, object, "end")
@@ -4754,6 +4966,25 @@ export function NoteObjectLayer({
               zIndex: 79,
             }}
           />
+          <div
+            className={`pointer-events-auto absolute flex h-7 w-7 touch-none cursor-grab items-center justify-center rounded-full border-2 border-blue-600 text-sm leading-none shadow-sm ${
+              isDark
+                ? "bg-slate-900 text-slate-100"
+                : "bg-white text-gray-800"
+            }`}
+            title="Rotate formed shape"
+            style={{
+              left:
+                selectedRecognizedShapeBounds.left +
+                selectedRecognizedShapeBounds.width -
+                10,
+              top: selectedRecognizedShapeBounds.top - 18,
+              zIndex: 84,
+            }}
+            onPointerDown={(event) => startRotate(event, selectedRecognizedShape)}
+          >
+            ↻
+          </div>
           <div
             className={`pointer-events-auto absolute flex h-6 w-6 touch-none cursor-nwse-resize items-center justify-center rounded-full border-2 border-blue-600 text-xs shadow-sm ${
               isDark
