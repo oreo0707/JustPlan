@@ -173,7 +173,8 @@ These limitations are acknowledged as part of the current development stage. The
 
 In the future, Just Plan may be developed into installable versions for both laptops and tablets.
 
-The core features would remain similar, such as task planning, scheduling, notes, statistics, and data backup. However, the note-taking experience may be optimised differently depending on the device.
+The core features would remain similar, such as task planning, scheduling, notes, statistics, and data backup. However, the note-taking experience, UI and other features
+may be optimised differently depending on the device.
 
 The laptop version would focus more on keyboard and mouse interactions, while the tablet version would focus more on stylus-based writing. Future versions would aim to improve offline access, provide a more app-like experience, and support better device-specific usability.
 
