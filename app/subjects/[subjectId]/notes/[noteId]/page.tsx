@@ -737,8 +737,18 @@ export default function NoteEditorPage() {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
     const activeScrollContainer = scrollContainer;
+    let gestureStartedInsideNote = false;
 
     function handleTouchStart(event: TouchEvent) {
+      gestureStartedInsideNote =
+        event.target instanceof Node &&
+        activeScrollContainer.contains(event.target);
+
+      if (!gestureStartedInsideNote) {
+        tabletGestureRef.current = null;
+        return;
+      }
+
       if (event.touches.length !== 2 && event.touches.length !== 3) {
         tabletGestureRef.current = null;
         return;
@@ -766,6 +776,8 @@ export default function NoteEditorPage() {
     }
 
     function handleTouchMove(event: TouchEvent) {
+      if (!gestureStartedInsideNote) return;
+
       const gesture = tabletGestureRef.current;
       if (!gesture || event.touches.length !== gesture.touchCount) return;
 
@@ -808,10 +820,16 @@ export default function NoteEditorPage() {
     }
 
     function handleTouchEnd(event: TouchEvent) {
+      if (!gestureStartedInsideNote) return;
+
       const gesture = tabletGestureRef.current;
-      if (!gesture || event.touches.length > 0) return;
+      if (!gesture || event.touches.length > 0) {
+        if (event.touches.length === 0) gestureStartedInsideNote = false;
+        return;
+      }
 
       tabletGestureRef.current = null;
+      gestureStartedInsideNote = false;
 
       const duration = Date.now() - gesture.startTime;
       const isTapGesture =
@@ -832,32 +850,32 @@ export default function NoteEditorPage() {
       }
     }
 
-    activeScrollContainer.addEventListener("touchstart", handleTouchStart, {
+    window.addEventListener("touchstart", handleTouchStart, {
       passive: false,
       capture: true,
     });
-    activeScrollContainer.addEventListener("touchmove", handleTouchMove, {
+    window.addEventListener("touchmove", handleTouchMove, {
       passive: false,
       capture: true,
     });
-    activeScrollContainer.addEventListener("touchend", handleTouchEnd, {
+    window.addEventListener("touchend", handleTouchEnd, {
       capture: true,
     });
-    activeScrollContainer.addEventListener("touchcancel", handleTouchEnd, {
+    window.addEventListener("touchcancel", handleTouchEnd, {
       capture: true,
     });
 
     return () => {
-      activeScrollContainer.removeEventListener("touchstart", handleTouchStart, {
+      window.removeEventListener("touchstart", handleTouchStart, {
         capture: true,
       });
-      activeScrollContainer.removeEventListener("touchmove", handleTouchMove, {
+      window.removeEventListener("touchmove", handleTouchMove, {
         capture: true,
       });
-      activeScrollContainer.removeEventListener("touchend", handleTouchEnd, {
+      window.removeEventListener("touchend", handleTouchEnd, {
         capture: true,
       });
-      activeScrollContainer.removeEventListener("touchcancel", handleTouchEnd, {
+      window.removeEventListener("touchcancel", handleTouchEnd, {
         capture: true,
       });
     };

@@ -442,6 +442,18 @@ function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean
   return !selectionMode && object.type !== "drawing";
 }
 
+function canObjectReceivePointerInCurrentMode(
+  object: NoteObject,
+  selectionMode: boolean,
+  drawingMode: boolean,
+  drawingTool: "draw" | "erase" | "highlight"
+) {
+  return (
+    canSelectObjectInCurrentMode(object, selectionMode) &&
+    !(drawingMode && drawingTool === "erase")
+  );
+}
+
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
   if (object.vertices?.length) return object.vertices;
 
@@ -2711,6 +2723,7 @@ export function NoteObjectLayer({
   function beginEraserStroke(initialPoint: DrawingPoint): ActiveEraserStroke {
     lockDocumentScrollForEraserStroke();
     setIsEraserScrollLocked(true);
+    onSelectionChangeRef.current([]);
     let workingObjects = objectsRef.current;
     let workingPendingDrawings = pendingDrawingsRef.current;
     const eraserRadius = Math.max(2, drawingStrokeWidthRef.current / 2);
@@ -3607,6 +3620,12 @@ export function NoteObjectLayer({
           object,
           selectionMode
         );
+        const canObjectReceivePointer = canObjectReceivePointerInCurrentMode(
+          object,
+          selectionMode,
+          drawingMode,
+          drawingTool
+        );
         const selected =
           canSelectObject &&
           selectedObjectIds.includes(object.id);
@@ -3655,7 +3674,7 @@ export function NoteObjectLayer({
                   className="pointer-events-auto cursor-move"
                   style={{ touchAction: "none" }}
                   onPointerDown={(event) => {
-                    if (!canSelectObject) return;
+                    if (!canObjectReceivePointer) return;
                     startDrag(event, object);
                   }}
                 />
@@ -3773,7 +3792,7 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              !canSelectObject
+              !canObjectReceivePointer
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3786,7 +3805,7 @@ export function NoteObjectLayer({
               top: object.y,
               width: object.width,
               height: object.height,
-              zIndex: selected ? 80 : canSelectObject ? 40 : undefined,
+              zIndex: selected ? 80 : canObjectReceivePointer ? 40 : undefined,
               touchAction: object.type === "textbox" ? "auto" : "none",
               WebkitUserSelect: object.type === "textbox" ? undefined : "none",
               userSelect: object.type === "textbox" ? undefined : "none",
@@ -3796,7 +3815,7 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
-              if (!canSelectObject) return;
+              if (!canObjectReceivePointer) return;
 
               if (object.type === "textbox") {
                 event.stopPropagation();
