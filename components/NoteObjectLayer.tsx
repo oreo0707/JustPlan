@@ -4073,7 +4073,8 @@ export function NoteObjectLayer({
                   onPointerDown={(event) => {
                     if (
                       canFingerUseRecognizedShape &&
-                      event.pointerType === "mouse"
+                      (event.pointerType === "mouse" ||
+                        event.pointerType === "pen")
                     ) {
                       startDrawing(event.nativeEvent);
                       return;
@@ -4091,8 +4092,7 @@ export function NoteObjectLayer({
 
                     if (
                       canFingerUseRecognizedShape &&
-                      (event.pointerType === "touch" ||
-                        event.pointerType === "pen")
+                      event.pointerType === "touch"
                     ) {
                       event.preventDefault();
                       event.stopPropagation();
@@ -4420,7 +4420,7 @@ export function NoteObjectLayer({
             onPointerDown={(event) => {
               if (
                 canFingerUseRecognizedShape &&
-                event.pointerType === "mouse"
+                (event.pointerType === "mouse" || event.pointerType === "pen")
               ) {
                 startDrawing(event.nativeEvent);
                 return;
@@ -4431,7 +4431,7 @@ export function NoteObjectLayer({
                 !(canFingerMoveSelectedDrawing && event.pointerType === "touch") &&
                 !(
                   canFingerUseRecognizedShape &&
-                  (event.pointerType === "touch" || event.pointerType === "pen")
+                  event.pointerType === "touch"
                 )
               ) {
                 return;
@@ -4449,7 +4449,7 @@ export function NoteObjectLayer({
 
               if (
                 canFingerUseRecognizedShape &&
-                (event.pointerType === "touch" || event.pointerType === "pen")
+                event.pointerType === "touch"
               ) {
                 event.preventDefault();
                 event.stopPropagation();
