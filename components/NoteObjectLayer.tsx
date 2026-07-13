@@ -440,7 +440,7 @@ function canDuplicateObject(object: NoteObject) {
 }
 
 function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean) {
-  return !selectionMode;
+  return !selectionMode && object.type !== "drawing";
 }
 
 function canObjectReceivePointerInCurrentMode(
@@ -584,6 +584,9 @@ export function NoteObjectLayer({
   const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
   const [drawingSelectionMenu, setDrawingSelectionMenu] = useState<
     "actions" | "style" | null
+  >(null);
+  const [drawModeShapeMenu, setDrawModeShapeMenu] = useState<
+    "actions" | "adjust" | null
   >(null);
   const [cropImageId, setCropImageId] = useState<string | null>(null);
   const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
@@ -1143,6 +1146,7 @@ export function NoteObjectLayer({
     objectsRef.current = nextObjects;
     onChangeObjectsRef.current(nextObjects);
     onSelectionChangeRef.current([recognizedObject.id]);
+    setDrawModeShapeMenu(null);
   }
 
   function scheduleStraightLineHold(point: DrawingPoint) {
@@ -3570,6 +3574,17 @@ export function NoteObjectLayer({
       ? `${drawingSelectionThicknesses[0]}px`
       : "-";
   const drawingSelectionColor = selectedDrawingObjects[0]?.color ?? "#111827";
+  const selectedDrawModeShape =
+    drawingMode && selectedObjectIds.length === 1
+      ? objects.find(
+          (object) =>
+            object.id === selectedObjectIds[0] &&
+            (isVertexShape(object) || object.type === "line")
+        )
+      : undefined;
+  const selectedDrawModeShapeBounds = selectedDrawModeShape
+    ? getObjectBounds(selectedDrawModeShape)
+    : null;
 
   return (
     <div
@@ -3717,12 +3732,18 @@ export function NoteObjectLayer({
           drawingMode
         );
         const selected = selectedObjectIds.includes(object.id);
+        const isSelectedDrawModeShape =
+          Boolean(selectedDrawModeShape) && selectedDrawModeShape?.id === object.id;
+        const canAdjustSelectedDrawModeShape =
+          isSelectedDrawModeShape && drawModeShapeMenu === "adjust";
         const showObjectControls =
           selected &&
-          canShowSelectionControls &&
+          (canShowSelectionControls || canAdjustSelectedDrawModeShape) &&
           !(hasDrawingOnlySelection && object.type === "drawing");
         const canFingerMoveSelectedDrawing =
           selectionMode && selected && object.type === "drawing";
+        const canFingerUseSelectedDrawModeShape =
+          isSelectedDrawModeShape;
 
         if (object.type === "line") {
           const points = getLinePoints(object);
@@ -3784,32 +3805,34 @@ export function NoteObjectLayer({
                     className="absolute"
                     style={{ left: points.startX, top: points.startY }}
                   >
-                    {renderActionToolbar()}
+                    {!isSelectedDrawModeShape && renderActionToolbar()}
                   </div>
-                  <button
-                    type="button"
-                    className={
-                      isDark
-                        ? "pointer-events-auto absolute rounded-md bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm ring-1 ring-slate-700"
-                        : "pointer-events-auto absolute rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
-                    }
-                    style={{ left: points.startX + 12, top: points.startY - 30 }}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setOpenShapeMenuId((current) =>
-                        current === object.id ? null : object.id
-                      );
-                    }}
-                  >
-                    ...
-                  </button>
+                  {!isSelectedDrawModeShape && (
+                    <button
+                      type="button"
+                      className={
+                        isDark
+                          ? "pointer-events-auto absolute rounded-md bg-slate-900 px-2 py-1 text-xs text-slate-100 shadow-sm ring-1 ring-slate-700"
+                          : "pointer-events-auto absolute rounded-md bg-white px-2 py-1 text-xs text-gray-700 shadow-sm ring-1 ring-gray-200"
+                      }
+                      style={{ left: points.startX + 12, top: points.startY - 30 }}
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOpenShapeMenuId((current) =>
+                          current === object.id ? null : object.id
+                        );
+                      }}
+                    >
+                      ...
+                    </button>
+                  )}
 
-                  {openShapeMenuId === object.id && (
+                  {openShapeMenuId === object.id && !isSelectedDrawModeShape && (
                     <div
                       className={
                         isDark
@@ -3892,7 +3915,8 @@ export function NoteObjectLayer({
             className={`${
               !canObjectReceivePointer &&
               !showObjectControls &&
-              !canFingerMoveSelectedDrawing
+              !canFingerMoveSelectedDrawing &&
+              !canFingerUseSelectedDrawModeShape
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3917,8 +3941,20 @@ export function NoteObjectLayer({
             onPointerDown={(event) => {
               if (
                 !canObjectReceivePointer &&
-                !(canFingerMoveSelectedDrawing && event.pointerType === "touch")
+                !(canFingerMoveSelectedDrawing && event.pointerType === "touch") &&
+                !(canFingerUseSelectedDrawModeShape && event.pointerType === "touch")
               ) {
+                return;
+              }
+
+              if (
+                canFingerUseSelectedDrawModeShape &&
+                event.pointerType === "touch" &&
+                !canAdjustSelectedDrawModeShape
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                setDrawModeShapeMenu("actions");
                 return;
               }
 
@@ -4147,7 +4183,7 @@ export function NoteObjectLayer({
                     .join(" ")}
                   fill={object.filled ? object.color ?? "#111827" : "transparent"}
                   stroke={object.color ?? "#111827"}
-                  strokeWidth="2"
+                  strokeWidth={object.strokeWidth ?? 2}
                   vectorEffect="non-scaling-stroke"
                 />
               </svg>
@@ -4165,7 +4201,7 @@ export function NoteObjectLayer({
                   d={getSmoothClosedPath(shapeVertices)}
                   fill={object.filled ? object.color ?? "#111827" : "transparent"}
                   stroke={object.color ?? "#111827"}
-                  strokeWidth="2"
+                  strokeWidth={object.strokeWidth ?? 2}
                   vectorEffect="non-scaling-stroke"
                 />
               </svg>
@@ -4185,7 +4221,7 @@ export function NoteObjectLayer({
                     .join(" ")}
                   fill={object.filled ? object.color ?? "#111827" : "transparent"}
                   stroke={object.color ?? "#111827"}
-                  strokeWidth="2"
+                  strokeWidth={object.strokeWidth ?? 2}
                   vectorEffect="non-scaling-stroke"
                 />
               </svg>
@@ -4216,7 +4252,10 @@ export function NoteObjectLayer({
               </svg>
             )}
 
-            {showObjectControls && hasSingleSelection && isVertexShape(object) && (
+            {showObjectControls &&
+              hasSingleSelection &&
+              isVertexShape(object) &&
+              !isSelectedDrawModeShape && (
               <>
                 <button
                   type="button"
@@ -4291,7 +4330,7 @@ export function NoteObjectLayer({
 
             {showObjectControls && hasSingleSelection && (
               <>
-                {renderActionToolbar()}
+                {!isSelectedDrawModeShape && renderActionToolbar()}
 
                 <div
                   className={`absolute -right-5 -top-5 flex h-7 w-7 touch-none cursor-grab items-center justify-center rounded-full border-2 border-blue-600 text-sm leading-none shadow-sm ${
@@ -4402,6 +4441,195 @@ export function NoteObjectLayer({
           </div>
         );
       })}
+
+      {selectedDrawModeShapeBounds && selectedDrawModeShape && (
+        <>
+          <button
+            type="button"
+            className={`pointer-events-auto absolute flex h-8 w-8 touch-none items-center justify-center rounded-full border-2 border-blue-600 text-sm shadow-sm ${
+              isDark
+                ? "bg-slate-900 text-slate-100"
+                : "bg-white text-gray-800"
+            }`}
+            title="Shape options"
+            style={{
+              left:
+                selectedDrawModeShapeBounds.left +
+                selectedDrawModeShapeBounds.width +
+                8,
+              top:
+                selectedDrawModeShapeBounds.top +
+                selectedDrawModeShapeBounds.height -
+                16,
+              zIndex: 84,
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setDrawModeShapeMenu((current) =>
+                current === "actions" ? null : "actions"
+              );
+            }}
+          >
+            ⋯
+          </button>
+
+          {drawModeShapeMenu === "actions" && (
+            <div
+              className={selectionActionPanelClass}
+              style={{
+                left:
+                  selectedDrawModeShapeBounds.left +
+                  selectedDrawModeShapeBounds.width +
+                  44,
+                top:
+                  selectedDrawModeShapeBounds.top +
+                  selectedDrawModeShapeBounds.height -
+                  16,
+                zIndex: 85,
+              }}
+            >
+              {renderSelectionActionButton("Adjust", "Adjust selected shape", () =>
+                setDrawModeShapeMenu("adjust")
+              )}
+              {renderSelectionActionButton(
+                "Duplicate",
+                "Duplicate selected shape",
+                duplicateSelectedObjects
+              )}
+              {renderSelectionActionButton("Cut", "Cut selected shape", cutSelectedObjects)}
+              {renderSelectionActionButton("Copy", "Copy selected shape", copySelectedObjects)}
+              {renderSelectionActionButton(
+                "Delete",
+                "Delete selected shape",
+                deleteSelectedObjects
+              )}
+            </div>
+          )}
+
+          {drawModeShapeMenu === "adjust" && (
+            <div
+              className={selectionActionPanelClass}
+              style={{
+                left:
+                  selectedDrawModeShapeBounds.left +
+                  selectedDrawModeShapeBounds.width +
+                  44,
+                top:
+                  selectedDrawModeShapeBounds.top +
+                  selectedDrawModeShapeBounds.height -
+                  16,
+                zIndex: 85,
+                width: 190,
+              }}
+            >
+              <button
+                type="button"
+                className={`${objectControlButtonClass} text-left`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDrawModeShapeMenu("actions");
+                }}
+              >
+                ← Options
+              </button>
+              {isVertexShape(selectedDrawModeShape) && (
+                <div className="flex gap-1 px-1">
+                  <button
+                    type="button"
+                    className={
+                      shapeEditMode === "points"
+                        ? "flex-1 rounded bg-blue-600 px-2 py-1 text-white"
+                        : `${objectControlButtonClass} flex-1`
+                    }
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setShapeEditMode("points");
+                    }}
+                  >
+                    Points
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      shapeEditMode === "resize"
+                        ? "flex-1 rounded bg-blue-600 px-2 py-1 text-white"
+                        : `${objectControlButtonClass} flex-1`
+                    }
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setShapeEditMode("resize");
+                    }}
+                  >
+                    Resize
+                  </button>
+                </div>
+              )}
+              <label
+                className={
+                  isDark
+                    ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
+                    : "flex flex-col gap-1 px-2 py-1 text-gray-700"
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                Thickness: {selectedDrawModeShape.strokeWidth ?? 2}px
+                <input
+                  type="range"
+                  min="1"
+                  max="36"
+                  value={selectedDrawModeShape.strokeWidth ?? 2}
+                  className="w-full"
+                  onChange={(event) =>
+                    updateObject(selectedDrawModeShape.id, {
+                      strokeWidth: Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label
+                className={
+                  isDark
+                    ? "flex items-center justify-between gap-2 px-2 py-1 text-slate-100"
+                    : "flex items-center justify-between gap-2 px-2 py-1 text-gray-700"
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                Color
+                <input
+                  type="color"
+                  value={selectedDrawModeShape.color ?? "#111827"}
+                  className="h-8 w-10 rounded border"
+                  onChange={(event) =>
+                    updateObject(selectedDrawModeShape.id, {
+                      color: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+        </>
+      )}
 
       {drawingSelectionBounds && canShowSelectionControls && (
         <>
