@@ -2470,7 +2470,7 @@ function addTextBox() {
         ←
       </Link>
 
-      <div className="no-print fixed left-16 top-4 z-[10001] flex items-center gap-2">
+      <div className="no-print fixed left-16 top-24 z-[10001] flex items-center gap-2">
         <button
           type="button"
           className={noteTopButtonClass}
