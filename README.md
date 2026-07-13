@@ -31,6 +31,7 @@ https://just-plan-two.vercel.app
 * View workload and deadline statistics
 * Generate AI study suggestions
 * Export and import user data for backup or device transfer
+* Export and import individual editable notes between devices
 * Replay tutorials to learn how to use the app
 
 ---
@@ -144,6 +145,64 @@ Online hosting was also chosen because Just Plan supports both text-based note-t
 
 ---
 
+## Desktop/Laptop and Tablet Note-Taking Support
+
+Just Plan supports both desktop/laptop users and tablet users. Instead of disabling features based on device type, the app keeps both text mode and draw mode available so users can choose the workflow that fits them best.
+
+This design decision was made because different devices support different interaction styles. Desktop and laptop users usually rely on a keyboard, mouse, or trackpad, while tablet users may use a stylus and touchscreen gestures.
+
+### Shared Note-Taking Features
+
+Both desktop/laptop and tablet users can use the main note-taking features, including:
+
+* Add images, textboxes, shapes, and stickers
+* Type text directly onto the note page
+* Use selection tools such as rectangle selection or freeform/draw selection
+* Draw on the note page
+* Move, resize, duplicate, cut, copy, or delete selected objects
+
+### Desktop/Laptop Experience
+
+For desktop and laptop users, text mode is recommended because it works better with keyboard and mouse interaction.
+
+Desktop/laptop usage is better suited for:
+
+* Typing structured notes
+* Editing textboxes
+* Selecting and arranging objects using a mouse or trackpad
+* Managing note content on a more spacious screen layout
+* Using the note editor with less visual crowding
+
+Draw mode is still available on desktop/laptop because some users may have touchscreen laptops, drawing tablets, or may still want to draw simple diagrams using a mouse. However, the drawing experience is mainly optimised for tablet and stylus usage.
+
+### Tablet Experience
+
+For tablet users, draw mode is recommended because it works better with stylus-based writing and touchscreen interaction.
+
+Tablet usage is better suited for:
+
+* Writing handwritten notes with a stylus
+* Drawing diagrams or annotations directly on the note page
+* Using the stylus for writing or drawing
+* Using finger touch to adjust, select, or manipulate objects
+* A more natural handwritten note-taking workflow
+
+A shape detection feature was also implemented for tablet-based drawing. This allows users to draw a rough shape, and the system can convert it into a cleaner standard shape based on what the user intended to draw.
+
+This feature was prioritised for tablet usage because stylus input makes freehand drawing more natural. On desktop or laptop, users usually rely on a mouse cursor for both drawing and selection, which can make gesture-based shape detection harder to control. However, draw mode is not disabled on desktop/laptop because some users may still use touchscreen laptops or external drawing tablets.
+
+### Design Decision
+
+Text mode and draw mode are both available across devices instead of being strictly disabled. This gives users more flexibility while still providing recommended workflows for different device types.
+
+In summary:
+
+* Desktop/laptop users are recommended to use text mode for typing, selection, and object arrangement.
+* Tablet users are recommended to use draw mode for handwriting, drawing, and stylus-based note-taking.
+* Both modes remain accessible so users can switch depending on their device and personal workflow.
+
+---
+
 ## Data Storage
 
 Just Plan currently uses browser localStorage to store user data.
@@ -169,12 +228,27 @@ These limitations are acknowledged as part of the current development stage. The
 
 ---
 
+## Backup and Restore
+
+Just Plan includes import and export features to help users manage and transfer their data.
+
+Users can export their full app data as a backup file and import it again later. This is useful when moving to another device or browser. Since the app currently uses browser localStorage, users are encouraged to export backups regularly to prevent data loss.
+
+To further address the limitations of localStorage, Just Plan also supports exporting individual notes as editable note files. Unlike a full backup import, importing an editable note does not replace the user’s entire app data. Instead, users can transfer a specific note between devices and continue editing it after import.
+
+For example, a user who uses both a tablet and a laptop can export a handwritten note from the tablet and import it into the laptop through the note import function in the subject’s note section. The imported note remains editable, allowing the user to continue making changes on the laptop.
+
+Similarly, a user can export a typed note from a desktop or laptop, transfer it to a tablet, import it into a subject, and continue editing the note using tablet-based writing or drawing tools.
+
+This allows users to move individual notes between devices without needing to reset or replace all existing data.
+
+---
+
 ## Future Plans
 
 In the future, Just Plan may be developed into installable versions for both laptops and tablets.
 
-The core features would remain similar, such as task planning, scheduling, notes, statistics, and data backup. However, the note-taking experience, UI and other features
-may be optimised differently depending on the device.
+The core features would remain similar, such as task planning, scheduling, notes, statistics, and data backup. However, the note-taking experience, UI, and other features may be optimised differently depending on the device.
 
 The laptop version would focus more on keyboard and mouse interactions, while the tablet version would focus more on stylus-based writing. Future versions would aim to improve offline access, provide a more app-like experience, and support better device-specific usability.
 
@@ -214,22 +288,7 @@ The app runs in the browser, and user data is stored locally using browser local
 
 ## Development Notes
 
-This project is built with Next.js, React, TypeScript, and Tailwind CSS.
-
-To run the project locally for development:
-
-```bash
-npm install
-npm run dev
-```
-
-Then open:
-
-```txt
-http://localhost:3000
-```
-
-Normal users do not need to run these commands. They only need the hosted app link.
+This project is built with Next.js, React, TypeScript, and Tailwind CSS. Normal users do not need to install dependencies because the app is accessed through the hosted Vercel link.
 
 ---
 
@@ -238,3 +297,17 @@ Normal users do not need to run these commands. They only need the hosted app li
 Just Plan is currently a hosted web application used for testing, feedback, and feature development.
 
 The current version focuses on building a functional planner and note-taking experience while exploring different deployment and storage approaches.
+
+---
+
+## Inspiration
+
+Just Plan is inspired by productivity and note-taking applications, including Notability. The project takes inspiration from common note-taking workflows, including typed notes, handwritten notes, drawing tools, highlighting, page-based note organisation, and tablet-friendly stylus interaction.
+
+All implementation, interface design, and feature development were created independently for learning and portfolio purposes.
+
+---
+
+## License
+
+This project is currently not open source. All rights are reserved by the developer.
