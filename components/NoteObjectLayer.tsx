@@ -428,6 +428,13 @@ function isVertexShape(object: NoteObject) {
   );
 }
 
+function isRecognizedDrawingShape(object: NoteObject) {
+  return (
+    object.generatedFromDrawing === true &&
+    (isVertexShape(object) || object.type === "line")
+  );
+}
+
 function canDuplicateObject(object: NoteObject) {
   return (
     isVertexShape(object) ||
@@ -585,8 +592,8 @@ export function NoteObjectLayer({
   const [drawingSelectionMenu, setDrawingSelectionMenu] = useState<
     "actions" | "style" | null
   >(null);
-  const [drawModeShapeMenu, setDrawModeShapeMenu] = useState<
-    "actions" | "adjust" | null
+  const [recognizedShapeMenu, setRecognizedShapeMenu] = useState<
+    "actions" | "style" | null
   >(null);
   const [cropImageId, setCropImageId] = useState<string | null>(null);
   const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
@@ -958,6 +965,89 @@ export function NoteObjectLayer({
     return aspectRatio >= 0.82 && aspectRatio <= 1.22;
   }
 
+  function getVertexAngle(
+    previous: ShapeVertex,
+    current: ShapeVertex,
+    next: ShapeVertex
+  ) {
+    const ax = previous.x - current.x;
+    const ay = previous.y - current.y;
+    const bx = next.x - current.x;
+    const by = next.y - current.y;
+    const lengthA = Math.hypot(ax, ay);
+    const lengthB = Math.hypot(bx, by);
+
+    if (lengthA === 0 || lengthB === 0) return 180;
+
+    const cosine = clampValue(
+      (ax * bx + ay * by) / (lengthA * lengthB),
+      -1,
+      1
+    );
+    return (Math.acos(cosine) * 180) / Math.PI;
+  }
+
+  function removeNearCollinearVertices(vertices: ShapeVertex[]) {
+    if (vertices.length <= 3) return vertices;
+
+    return vertices.filter((vertex, index) => {
+      const previous = vertices[(index - 1 + vertices.length) % vertices.length];
+      const next = vertices[(index + 1) % vertices.length];
+      const angle = getVertexAngle(previous, vertex, next);
+      return Math.abs(180 - angle) > 16;
+    });
+  }
+
+  function isRectangleLikeShape(
+    vertices: ShapeVertex[],
+    base: { width: number; height: number }
+  ) {
+    if (vertices.length !== 4 || base.width < 12 || base.height < 12) {
+      return false;
+    }
+
+    const anglesLookRectangular = vertices.every((vertex, index) => {
+      const previous = vertices[(index - 1 + vertices.length) % vertices.length];
+      const next = vertices[(index + 1) % vertices.length];
+      const angle = getVertexAngle(previous, vertex, next);
+      return angle >= 65 && angle <= 115;
+    });
+
+    if (!anglesLookRectangular) return false;
+
+    const expectedCorners = [
+      { x: 0, y: 0 },
+      { x: base.width, y: 0 },
+      { x: base.width, y: base.height },
+      { x: 0, y: base.height },
+    ];
+    const availableCorners = [...expectedCorners];
+    const cornerTolerance = Math.max(
+      16,
+      Math.hypot(base.width, base.height) * 0.18
+    );
+
+    return vertices.every((vertex) => {
+      let closestIndex = -1;
+      let closestDistance = Number.POSITIVE_INFINITY;
+
+      availableCorners.forEach((corner, index) => {
+        const distance = Math.hypot(vertex.x - corner.x, vertex.y - corner.y);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      });
+
+      if (closestIndex === -1 || closestDistance > cornerTolerance) {
+        return false;
+      }
+
+      availableCorners.splice(closestIndex, 1);
+      return true;
+    });
+  }
+
   function createRecognizedStrokeObject(points: DrawingPoint[]): NoteObject | null {
     if (points.length < 2) return null;
 
@@ -993,6 +1083,7 @@ export function NoteObjectLayer({
         height: Math.max(1, Math.abs(lastPoint.y - firstPoint.y)),
         color: drawingColorRef.current,
         strokeWidth: drawingStrokeWidthRef.current,
+        generatedFromDrawing: true,
         flipX: false,
         flipY: false,
       };
@@ -1046,18 +1137,21 @@ export function NoteObjectLayer({
         height: ellipseBase.height,
         color: drawingColorRef.current,
         strokeWidth: drawingStrokeWidthRef.current,
+        generatedFromDrawing: true,
         filled: false,
         flipX: false,
         flipY: false,
       };
     }
 
-    const vertices = simplified
+    const vertices = removeNearCollinearVertices(
+      simplified
       .slice(0, 10)
       .map((point) => ({
         x: clampValue(point.x - base.x, 0, base.width),
         y: clampValue(point.y - base.y, 0, base.height),
-      }));
+      }))
+    );
 
     if (vertices.length === 3) {
       return {
@@ -1067,6 +1161,7 @@ export function NoteObjectLayer({
         vertices,
         color: drawingColorRef.current,
         strokeWidth: drawingStrokeWidthRef.current,
+        generatedFromDrawing: true,
         filled: false,
         flipX: false,
         flipY: false,
@@ -1074,6 +1169,21 @@ export function NoteObjectLayer({
     }
 
     if (vertices.length >= 4 && vertices.length <= 6) {
+      if (!isRectangleLikeShape(vertices, base)) {
+        return {
+          id: crypto.randomUUID(),
+          type: "rectangle" as const,
+          ...base,
+          vertices,
+          color: drawingColorRef.current,
+          strokeWidth: drawingStrokeWidthRef.current,
+          generatedFromDrawing: true,
+          filled: false,
+          flipX: false,
+          flipY: false,
+        };
+      }
+
       const rectangleBase = shouldSnapToSquare(base)
         ? getSquareLikeBase(base)
         : {
@@ -1098,6 +1208,7 @@ export function NoteObjectLayer({
         ],
         color: drawingColorRef.current,
         strokeWidth: drawingStrokeWidthRef.current,
+        generatedFromDrawing: true,
         filled: false,
         flipX: false,
         flipY: false,
@@ -1112,6 +1223,7 @@ export function NoteObjectLayer({
         vertices,
         color: drawingColorRef.current,
         strokeWidth: drawingStrokeWidthRef.current,
+        generatedFromDrawing: true,
         filled: false,
         flipX: false,
         flipY: false,
@@ -1146,7 +1258,7 @@ export function NoteObjectLayer({
     objectsRef.current = nextObjects;
     onChangeObjectsRef.current(nextObjects);
     onSelectionChangeRef.current([recognizedObject.id]);
-    setDrawModeShapeMenu(null);
+    setRecognizedShapeMenu(null);
   }
 
   function scheduleStraightLineHold(point: DrawingPoint) {
@@ -3574,16 +3686,16 @@ export function NoteObjectLayer({
       ? `${drawingSelectionThicknesses[0]}px`
       : "-";
   const drawingSelectionColor = selectedDrawingObjects[0]?.color ?? "#111827";
-  const selectedDrawModeShape =
-    drawingMode && selectedObjectIds.length === 1
+  const selectedRecognizedShape =
+    selectedObjectIds.length === 1
       ? objects.find(
           (object) =>
             object.id === selectedObjectIds[0] &&
-            (isVertexShape(object) || object.type === "line")
+            isRecognizedDrawingShape(object)
         )
       : undefined;
-  const selectedDrawModeShapeBounds = selectedDrawModeShape
-    ? getObjectBounds(selectedDrawModeShape)
+  const selectedRecognizedShapeBounds = selectedRecognizedShape
+    ? getObjectBounds(selectedRecognizedShape)
     : null;
 
   return (
@@ -3732,18 +3844,16 @@ export function NoteObjectLayer({
           drawingMode
         );
         const selected = selectedObjectIds.includes(object.id);
-        const isSelectedDrawModeShape =
-          Boolean(selectedDrawModeShape) && selectedDrawModeShape?.id === object.id;
-        const canAdjustSelectedDrawModeShape =
-          isSelectedDrawModeShape && drawModeShapeMenu === "adjust";
+        const isRecognizedShape = isRecognizedDrawingShape(object);
         const showObjectControls =
           selected &&
-          (canShowSelectionControls || canAdjustSelectedDrawModeShape) &&
-          !(hasDrawingOnlySelection && object.type === "drawing");
+          canShowSelectionControls &&
+          !(hasDrawingOnlySelection && object.type === "drawing") &&
+          !isRecognizedShape;
         const canFingerMoveSelectedDrawing =
           selectionMode && selected && object.type === "drawing";
-        const canFingerUseSelectedDrawModeShape =
-          isSelectedDrawModeShape;
+        const canFingerUseRecognizedShape =
+          isRecognizedShape && drawingMode && drawingTool !== "erase";
 
         if (object.type === "line") {
           const points = getLinePoints(object);
@@ -3752,13 +3862,21 @@ export function NoteObjectLayer({
           return (
             <div
               key={object.id}
-              className="pointer-events-none absolute inset-0"
+              className={`absolute inset-0 ${
+                canFingerUseRecognizedShape ? "pointer-events-auto" : "pointer-events-none"
+              }`}
               style={{
-                zIndex: selected ? 80 : canSelectObject ? 40 : undefined,
+                zIndex: selected
+                  ? 80
+                  : canFingerUseRecognizedShape
+                    ? 78
+                    : canSelectObject
+                      ? 40
+                      : undefined,
               }}
             >
               <svg className="absolute inset-0 h-full w-full overflow-visible">
-                {selected && (
+                {selected && !isRecognizedShape && (
                   <line
                     x1={points.startX}
                     y1={points.startY}
@@ -3787,12 +3905,36 @@ export function NoteObjectLayer({
                   stroke="transparent"
                   strokeWidth={Math.max(20, lineStrokeWidth + 14)}
                   className={
-                    canObjectReceivePointer
+                    canObjectReceivePointer || canFingerUseRecognizedShape
                       ? "pointer-events-auto cursor-move"
                       : "pointer-events-none"
                   }
-                  style={{ touchAction: canObjectReceivePointer ? "none" : "auto" }}
+                  style={{
+                    touchAction:
+                      canObjectReceivePointer || canFingerUseRecognizedShape
+                        ? "none"
+                        : "auto",
+                  }}
                   onPointerDown={(event) => {
+                    if (
+                      canFingerUseRecognizedShape &&
+                      isDrawingPointer(event.nativeEvent)
+                    ) {
+                      startDrawing(event.nativeEvent);
+                      return;
+                    }
+
+                    if (
+                      canFingerUseRecognizedShape &&
+                      event.pointerType === "touch"
+                    ) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSelectionChange([object.id]);
+                      setRecognizedShapeMenu("actions");
+                      return;
+                    }
+
                     if (!canObjectReceivePointer) return;
                     startDrag(event, object);
                   }}
@@ -3805,9 +3947,9 @@ export function NoteObjectLayer({
                     className="absolute"
                     style={{ left: points.startX, top: points.startY }}
                   >
-                    {!isSelectedDrawModeShape && renderActionToolbar()}
+                    {!isRecognizedShape && renderActionToolbar()}
                   </div>
-                  {!isSelectedDrawModeShape && (
+                  {!isRecognizedShape && (
                     <button
                       type="button"
                       className={
@@ -3832,7 +3974,7 @@ export function NoteObjectLayer({
                     </button>
                   )}
 
-                  {openShapeMenuId === object.id && !isSelectedDrawModeShape && (
+                  {openShapeMenuId === object.id && !isRecognizedShape && (
                     <div
                       className={
                         isDark
@@ -3916,11 +4058,13 @@ export function NoteObjectLayer({
               !canObjectReceivePointer &&
               !showObjectControls &&
               !canFingerMoveSelectedDrawing &&
-              !canFingerUseSelectedDrawModeShape
+              !canFingerUseRecognizedShape
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
-              selected && !(hasDrawingOnlySelection && object.type === "drawing")
+              selected &&
+              !(hasDrawingOnlySelection && object.type === "drawing") &&
+              !isRecognizedShape
                 ? "ring-2 ring-blue-600 ring-offset-2 ring-offset-transparent"
                 : ""
             }`}
@@ -3929,7 +4073,13 @@ export function NoteObjectLayer({
               top: object.y,
               width: object.width,
               height: object.height,
-              zIndex: selected ? 80 : canObjectReceivePointer ? 40 : undefined,
+              zIndex: selected
+                ? 80
+                : canFingerUseRecognizedShape
+                  ? 78
+                  : canObjectReceivePointer
+                    ? 40
+                    : undefined,
               touchAction: object.type === "textbox" ? "auto" : "none",
               WebkitUserSelect: object.type === "textbox" ? undefined : "none",
               userSelect: object.type === "textbox" ? undefined : "none",
@@ -3940,21 +4090,41 @@ export function NoteObjectLayer({
             }}
             onPointerDown={(event) => {
               if (
+                canFingerUseRecognizedShape &&
+                isDrawingPointer(event.nativeEvent)
+              ) {
+                startDrawing(event.nativeEvent);
+                return;
+              }
+
+              if (
                 !canObjectReceivePointer &&
                 !(canFingerMoveSelectedDrawing && event.pointerType === "touch") &&
-                !(canFingerUseSelectedDrawModeShape && event.pointerType === "touch")
+                !(canFingerUseRecognizedShape && event.pointerType === "touch")
               ) {
                 return;
               }
 
               if (
-                canFingerUseSelectedDrawModeShape &&
-                event.pointerType === "touch" &&
-                !canAdjustSelectedDrawModeShape
+                canFingerUseRecognizedShape &&
+                event.pointerType === "touch"
               ) {
                 event.preventDefault();
                 event.stopPropagation();
-                setDrawModeShapeMenu("actions");
+                onSelectionChange([object.id]);
+                setRecognizedShapeMenu("actions");
+                return;
+              }
+
+              if (
+                isRecognizedShape &&
+                event.pointerType === "touch" &&
+                !selectionMode
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                onSelectionChange([object.id]);
+                setRecognizedShapeMenu("actions");
                 return;
               }
 
@@ -4255,7 +4425,7 @@ export function NoteObjectLayer({
             {showObjectControls &&
               hasSingleSelection &&
               isVertexShape(object) &&
-              !isSelectedDrawModeShape && (
+              !isRecognizedShape && (
               <>
                 <button
                   type="button"
@@ -4330,7 +4500,7 @@ export function NoteObjectLayer({
 
             {showObjectControls && hasSingleSelection && (
               <>
-                {!isSelectedDrawModeShape && renderActionToolbar()}
+                {!isRecognizedShape && renderActionToolbar()}
 
                 <div
                   className={`absolute -right-5 -top-5 flex h-7 w-7 touch-none cursor-grab items-center justify-center rounded-full border-2 border-blue-600 text-sm leading-none shadow-sm ${
@@ -4442,8 +4612,18 @@ export function NoteObjectLayer({
         );
       })}
 
-      {selectedDrawModeShapeBounds && selectedDrawModeShape && (
+      {selectedRecognizedShapeBounds && selectedRecognizedShape && !selectionMode && (
         <>
+          <div
+            className="pointer-events-none absolute border-2 border-blue-600"
+            style={{
+              left: selectedRecognizedShapeBounds.left,
+              top: selectedRecognizedShapeBounds.top,
+              width: selectedRecognizedShapeBounds.width,
+              height: selectedRecognizedShapeBounds.height,
+              zIndex: 79,
+            }}
+          />
           <button
             type="button"
             className={`pointer-events-auto absolute flex h-8 w-8 touch-none items-center justify-center rounded-full border-2 border-blue-600 text-sm shadow-sm ${
@@ -4454,12 +4634,12 @@ export function NoteObjectLayer({
             title="Shape options"
             style={{
               left:
-                selectedDrawModeShapeBounds.left +
-                selectedDrawModeShapeBounds.width +
+                selectedRecognizedShapeBounds.left +
+                selectedRecognizedShapeBounds.width +
                 8,
               top:
-                selectedDrawModeShapeBounds.top +
-                selectedDrawModeShapeBounds.height -
+                selectedRecognizedShapeBounds.top +
+                selectedRecognizedShapeBounds.height -
                 16,
               zIndex: 84,
             }}
@@ -4470,7 +4650,7 @@ export function NoteObjectLayer({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              setDrawModeShapeMenu((current) =>
+              setRecognizedShapeMenu((current) =>
                 current === "actions" ? null : "actions"
               );
             }}
@@ -4478,23 +4658,23 @@ export function NoteObjectLayer({
             ⋯
           </button>
 
-          {drawModeShapeMenu === "actions" && (
+          {recognizedShapeMenu === "actions" && (
             <div
               className={selectionActionPanelClass}
               style={{
                 left:
-                  selectedDrawModeShapeBounds.left +
-                  selectedDrawModeShapeBounds.width +
+                  selectedRecognizedShapeBounds.left +
+                  selectedRecognizedShapeBounds.width +
                   44,
                 top:
-                  selectedDrawModeShapeBounds.top +
-                  selectedDrawModeShapeBounds.height -
+                  selectedRecognizedShapeBounds.top +
+                  selectedRecognizedShapeBounds.height -
                   16,
                 zIndex: 85,
               }}
             >
-              {renderSelectionActionButton("Adjust", "Adjust selected shape", () =>
-                setDrawModeShapeMenu("adjust")
+              {renderSelectionActionButton("Style", "Style selected shape", () =>
+                setRecognizedShapeMenu("style")
               )}
               {renderSelectionActionButton(
                 "Duplicate",
@@ -4511,17 +4691,17 @@ export function NoteObjectLayer({
             </div>
           )}
 
-          {drawModeShapeMenu === "adjust" && (
+          {recognizedShapeMenu === "style" && (
             <div
               className={selectionActionPanelClass}
               style={{
                 left:
-                  selectedDrawModeShapeBounds.left +
-                  selectedDrawModeShapeBounds.width +
+                  selectedRecognizedShapeBounds.left +
+                  selectedRecognizedShapeBounds.width +
                   44,
                 top:
-                  selectedDrawModeShapeBounds.top +
-                  selectedDrawModeShapeBounds.height -
+                  selectedRecognizedShapeBounds.top +
+                  selectedRecognizedShapeBounds.height -
                   16,
                 zIndex: 85,
                 width: 190,
@@ -4537,53 +4717,11 @@ export function NoteObjectLayer({
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  setDrawModeShapeMenu("actions");
+                  setRecognizedShapeMenu("actions");
                 }}
               >
                 ← Options
               </button>
-              {isVertexShape(selectedDrawModeShape) && (
-                <div className="flex gap-1 px-1">
-                  <button
-                    type="button"
-                    className={
-                      shapeEditMode === "points"
-                        ? "flex-1 rounded bg-blue-600 px-2 py-1 text-white"
-                        : `${objectControlButtonClass} flex-1`
-                    }
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setShapeEditMode("points");
-                    }}
-                  >
-                    Points
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      shapeEditMode === "resize"
-                        ? "flex-1 rounded bg-blue-600 px-2 py-1 text-white"
-                        : `${objectControlButtonClass} flex-1`
-                    }
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setShapeEditMode("resize");
-                    }}
-                  >
-                    Resize
-                  </button>
-                </div>
-              )}
               <label
                 className={
                   isDark
@@ -4592,15 +4730,15 @@ export function NoteObjectLayer({
                 }
                 onPointerDown={(event) => event.stopPropagation()}
               >
-                Thickness: {selectedDrawModeShape.strokeWidth ?? 2}px
+                Thickness: {selectedRecognizedShape.strokeWidth ?? 2}px
                 <input
                   type="range"
                   min="1"
                   max="36"
-                  value={selectedDrawModeShape.strokeWidth ?? 2}
+                  value={selectedRecognizedShape.strokeWidth ?? 2}
                   className="w-full"
                   onChange={(event) =>
-                    updateObject(selectedDrawModeShape.id, {
+                    updateObject(selectedRecognizedShape.id, {
                       strokeWidth: Number(event.target.value),
                     })
                   }
@@ -4617,10 +4755,10 @@ export function NoteObjectLayer({
                 Color
                 <input
                   type="color"
-                  value={selectedDrawModeShape.color ?? "#111827"}
+                  value={selectedRecognizedShape.color ?? "#111827"}
                   className="h-8 w-10 rounded border"
                   onChange={(event) =>
-                    updateObject(selectedDrawModeShape.id, {
+                    updateObject(selectedRecognizedShape.id, {
                       color: event.target.value,
                     })
                   }

@@ -102,6 +102,7 @@ export type NoteObject = {
   points?: DrawingPoint[];
   strokeWidth?: number;
   drawingTool?: "draw" | "highlight";
+  generatedFromDrawing?: boolean;
 
   color?: string;
   filled?: boolean;

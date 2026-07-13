@@ -97,6 +97,14 @@ export default function NoteEditorPage() {
       template: NoteTemplate;
     }>
   >([]);
+  const redoStackRef = useRef<
+    Array<{
+      content: string;
+      objects: NoteObject[];
+      template: NoteTemplate;
+    }>
+  >([]);
+  const isApplyingHistoryRef = useRef(false);
   const pageWidth = 794;
   const pageHeight = 1123;
   const PAGE_CLIPBOARD_KEY = "just-study-page-clipboard";
@@ -123,6 +131,9 @@ export default function NoteEditorPage() {
       setContent(foundNote?.content ?? "");
       setTemplate(foundNote?.template ?? "plain");
       setObjects(foundNote?.objects ?? []);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      drawingObjectRedoStackRef.current = [];
       setManualPageCount(foundNote?.page_count ?? 1);
       setPageBookmarks(foundNote?.page_bookmarks ?? []);
       setHasPageClipboard(
@@ -212,30 +223,20 @@ export default function NoteEditorPage() {
     return () => cancelAnimationFrame(frameId);
   }, [data, hasLoaded, subjectId, noteId]);
 
-  function pushUndoSnapshot() {
-    const latestSnapshot = undoStackRef.current.at(-1);
-    const nextSnapshot = {
+  function getCurrentUndoSnapshot() {
+    return {
       content,
       objects,
       template,
     };
-
-    if (
-      latestSnapshot &&
-      latestSnapshot.content === nextSnapshot.content &&
-      latestSnapshot.template === nextSnapshot.template &&
-      JSON.stringify(latestSnapshot.objects) === JSON.stringify(nextSnapshot.objects)
-    ) {
-      return;
-    }
-
-    undoStackRef.current = [...undoStackRef.current.slice(-49), nextSnapshot];
   }
 
-  function applyUndoSnapshot() {
-    const snapshot = undoStackRef.current.pop();
-    if (!snapshot) return;
-
+  function applyHistorySnapshot(snapshot: {
+    content: string;
+    objects: NoteObject[];
+    template: NoteTemplate;
+  }) {
+    isApplyingHistoryRef.current = true;
     setContent(snapshot.content);
     setObjects(snapshot.objects);
     setTemplate(snapshot.template);
@@ -262,6 +263,51 @@ export default function NoteEditorPage() {
     setData(updatedData);
     setIsNoteSaved(false);
     setSelectedObjectIds([]);
+
+    requestAnimationFrame(() => {
+      isApplyingHistoryRef.current = false;
+    });
+  }
+
+  function pushUndoSnapshot({ clearRedo = true } = {}) {
+    const latestSnapshot = undoStackRef.current.at(-1);
+    const nextSnapshot = getCurrentUndoSnapshot();
+
+    if (
+      latestSnapshot &&
+      latestSnapshot.content === nextSnapshot.content &&
+      latestSnapshot.template === nextSnapshot.template &&
+      JSON.stringify(latestSnapshot.objects) === JSON.stringify(nextSnapshot.objects)
+    ) {
+      return;
+    }
+
+    undoStackRef.current = [...undoStackRef.current.slice(-49), nextSnapshot];
+    if (clearRedo) {
+      redoStackRef.current = [];
+      drawingObjectRedoStackRef.current = [];
+    }
+  }
+
+  function applyUndoSnapshot() {
+    const snapshot = undoStackRef.current.pop();
+    if (!snapshot) return false;
+
+    redoStackRef.current = [
+      ...redoStackRef.current.slice(-49),
+      getCurrentUndoSnapshot(),
+    ];
+    applyHistorySnapshot(snapshot);
+    return true;
+  }
+
+  function applyRedoSnapshot() {
+    const snapshot = redoStackRef.current.pop();
+    if (!snapshot) return false;
+
+    pushUndoSnapshot({ clearRedo: false });
+    applyHistorySnapshot(snapshot);
+    return true;
   }
 
   function handleSaveNote() {
@@ -626,8 +672,7 @@ export default function NoteEditorPage() {
   useEffect(() => {
     function handleUndoShortcut(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      const isEditableTarget =
-        target?.isContentEditable ||
+      const isFormField =
         target?.tagName === "INPUT" ||
         target?.tagName === "TEXTAREA" ||
         target?.tagName === "SELECT";
@@ -642,13 +687,14 @@ export default function NoteEditorPage() {
           event.key.toLowerCase() === "z") ||
         ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y");
 
-      if ((!isUndoShortcut && !isRedoShortcut) || isEditableTarget) {
+      if ((!isUndoShortcut && !isRedoShortcut) || isFormField) {
         return;
       }
 
       event.preventDefault();
 
       if (isRedoShortcut) {
+        if (applyRedoSnapshot()) return;
         setDrawingRedoRequestId((current) => current + 1);
         if (redoLatestSavedDrawingStroke()) return;
         return;
@@ -659,11 +705,11 @@ export default function NoteEditorPage() {
         return;
       }
 
-      if (undoLatestSavedDrawingStroke()) {
+      if (applyUndoSnapshot()) {
         return;
       }
 
-      applyUndoSnapshot();
+      undoLatestSavedDrawingStroke();
     }
 
     window.addEventListener("keydown", handleUndoShortcut);
@@ -703,14 +749,18 @@ export default function NoteEditorPage() {
       return;
     }
 
-    if (undoLatestSavedDrawingStroke()) {
+    if (applyUndoSnapshot()) {
       return;
     }
 
-    applyUndoSnapshot();
+    undoLatestSavedDrawingStroke();
   }
 
   function runTabletRedoGesture() {
+    if (applyRedoSnapshot()) {
+      return;
+    }
+
     setDrawingRedoRequestId((current) => current + 1);
     if (redoLatestSavedDrawingStroke()) {
       return;
@@ -804,6 +854,15 @@ export default function NoteEditorPage() {
   });
 
   function handleChangeContent(nextContent: string) {
+    if (isApplyingHistoryRef.current) {
+      setContent(nextContent);
+      return;
+    }
+
+    if (nextContent !== content) {
+      pushUndoSnapshot();
+    }
+
     setContent(nextContent);
     if (nextContent !== content) {
       setIsNoteSaved(false);
