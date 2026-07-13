@@ -309,6 +309,54 @@ function eraseLineAtPoint(
   };
 }
 
+function doesEraserTouchBox(
+  object: NoteObject,
+  point: DrawingPoint,
+  hitRadius: number
+) {
+  const bounds = getObjectBounds(object);
+
+  return boxesIntersect(
+    {
+      left: point.x - hitRadius,
+      top: point.y - hitRadius,
+      width: hitRadius * 2,
+      height: hitRadius * 2,
+    },
+    bounds
+  );
+}
+
+function eraseObjectAtPoint(
+  object: NoteObject,
+  point: DrawingPoint,
+  hitRadius: number
+) {
+  if (object.type === "drawing") {
+    return eraseDrawingAtPoint(object, point, hitRadius);
+  }
+
+  if (object.type === "line") {
+    return eraseLineAtPoint(object, point, hitRadius);
+  }
+
+  if (
+    isVertexShape(object) ||
+    object.type === "image" ||
+    object.type === "sticker" ||
+    object.type === "textbox"
+  ) {
+    const touched = doesEraserTouchBox(object, point, Math.max(10, hitRadius));
+
+    return {
+      changed: touched,
+      objects: touched ? [] : [object],
+    };
+  }
+
+  return { changed: false, objects: [object] };
+}
+
 function boxesIntersect(a: SelectionBox, b: SelectionBox) {
   return (
     a.left <= b.left + b.width &&
@@ -390,8 +438,8 @@ function canDuplicateObject(object: NoteObject) {
   );
 }
 
-function canEditObjectInDrawMode(object: NoteObject) {
-  return object.type !== "drawing";
+function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean) {
+  return !selectionMode && object.type !== "drawing";
 }
 
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
@@ -2676,12 +2724,7 @@ export function NoteObjectLayer({
       let savedChanged = false;
       let pendingChanged = false;
       const nextObjects = workingObjects.flatMap((object) => {
-        if (object.type !== "drawing" && object.type !== "line") return [object];
-
-        const result =
-          object.type === "line"
-            ? eraseLineAtPoint(object, point, eraserRadius)
-            : eraseDrawingAtPoint(object, point, eraserRadius);
+        const result = eraseObjectAtPoint(object, point, eraserRadius);
         if (result.changed) savedChanged = true;
 
         return result.objects;
@@ -2832,7 +2875,10 @@ export function NoteObjectLayer({
       return;
     }
 
-    if (finalPoints.length < 2) return;
+    if (finalPoints.length < 2) {
+      onSelectionChange([]);
+      return;
+    }
 
     const strokeWidth = drawingStrokeWidthRef.current;
     const padding = Math.max(6, strokeWidth);
@@ -2941,22 +2987,8 @@ export function NoteObjectLayer({
       };
     }
 
-    function handleGestureTouchStart(event: TouchEvent) {
-      if (!drawingModeRef.current) return;
-      if (event.touches.length === 2) {
-        tabletGestureRef.current = null;
-        return;
-      }
-      if (event.touches.length !== 2 && event.touches.length !== 3) return;
-
-      const center = getTouchCentroid(event.touches);
-      tabletGestureRef.current = {
-        touchCount: event.touches.length,
-        startTime: Date.now(),
-        startX: center.x,
-        startY: center.y,
-        maxDistance: 0,
-      };
+    function handleGestureTouchStart() {
+      tabletGestureRef.current = null;
     }
 
     function handleGestureTouchMove(event: TouchEvent) {
@@ -3571,10 +3603,12 @@ export function NoteObjectLayer({
       ))}
 
       {objects.map((object) => {
-        const canEditInDrawMode =
-          drawingMode && drawingTool === "draw" && canEditObjectInDrawMode(object);
+        const canSelectObject = canSelectObjectInCurrentMode(
+          object,
+          selectionMode
+        );
         const selected =
-          (!drawingMode || canEditInDrawMode) &&
+          canSelectObject &&
           selectedObjectIds.includes(object.id);
 
         if (object.type === "line") {
@@ -3586,7 +3620,7 @@ export function NoteObjectLayer({
               key={object.id}
               className="pointer-events-none absolute inset-0"
               style={{
-                zIndex: selected ? 80 : canEditInDrawMode ? 40 : undefined,
+                zIndex: selected ? 80 : canSelectObject ? 40 : undefined,
               }}
             >
               <svg className="absolute inset-0 h-full w-full overflow-visible">
@@ -3621,7 +3655,7 @@ export function NoteObjectLayer({
                   className="pointer-events-auto cursor-move"
                   style={{ touchAction: "none" }}
                   onPointerDown={(event) => {
-                    if (drawingMode && event.pointerType === "mouse") return;
+                    if (!canSelectObject) return;
                     startDrag(event, object);
                   }}
                 />
@@ -3731,7 +3765,6 @@ export function NoteObjectLayer({
           );
         }
 
-        const isEditableDuringDrawing = drawingMode && canEditInDrawMode;
         const shapeVertices = isVertexShape(object)
           ? getShapeVertices(object)
           : [];
@@ -3740,7 +3773,7 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              drawingMode && !isEditableDuringDrawing
+              !canSelectObject
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3753,7 +3786,7 @@ export function NoteObjectLayer({
               top: object.y,
               width: object.width,
               height: object.height,
-              zIndex: selected ? 80 : drawingMode && canEditInDrawMode ? 40 : undefined,
+              zIndex: selected ? 80 : canSelectObject ? 40 : undefined,
               touchAction: object.type === "textbox" ? "auto" : "none",
               WebkitUserSelect: object.type === "textbox" ? undefined : "none",
               userSelect: object.type === "textbox" ? undefined : "none",
@@ -3763,7 +3796,7 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
-              if (drawingMode && event.pointerType === "mouse") return;
+              if (!canSelectObject) return;
 
               if (object.type === "textbox") {
                 event.stopPropagation();

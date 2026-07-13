@@ -83,11 +83,18 @@ export default function NoteEditorPage() {
   const pendingDrawingCountRef = useRef(0);
   const skipNextObjectDirtyMarkRef = useRef(false);
   const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
-  const pinchZoomRef = useRef<{
+  const tabletGestureRef = useRef<{
+    touchCount: number;
     distance: number;
     zoom: number;
     centerX: number;
     centerY: number;
+    startX: number;
+    startY: number;
+    startTime: number;
+    maxMove: number;
+    maxDistanceChange: number;
+    isPinching: boolean;
     scrollLeft: number;
     scrollTop: number;
   } | null>(null);
@@ -706,62 +713,122 @@ export default function NoteEditorPage() {
     };
   }
 
+  function runTabletUndoGesture() {
+    if (pendingDrawingCountRef.current > 0) {
+      setDrawingUndoRequestId((current) => current + 1);
+      return;
+    }
+
+    if (undoLatestSavedDrawingStroke()) {
+      return;
+    }
+
+    applyUndoSnapshot();
+  }
+
+  function runTabletRedoGesture() {
+    setDrawingRedoRequestId((current) => current + 1);
+    if (redoLatestSavedDrawingStroke()) {
+      return;
+    }
+  }
+
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
     const activeScrollContainer = scrollContainer;
 
     function handleTouchStart(event: TouchEvent) {
-      if (event.touches.length !== 2) {
-        pinchZoomRef.current = null;
+      if (event.touches.length !== 2 && event.touches.length !== 3) {
+        tabletGestureRef.current = null;
         return;
       }
 
       const distance = getTouchDistance(event.touches);
-      if (distance <= 0) return;
-
-      event.stopImmediatePropagation();
-
       const center = getTouchCenter(event.touches);
       const containerBounds = activeScrollContainer.getBoundingClientRect();
 
-      pinchZoomRef.current = {
+      tabletGestureRef.current = {
+        touchCount: event.touches.length,
         distance,
         zoom: noteZoom,
         centerX: center.x - containerBounds.left,
         centerY: center.y - containerBounds.top,
+        startX: center.x,
+        startY: center.y,
+        startTime: Date.now(),
+        maxMove: 0,
+        maxDistanceChange: 0,
+        isPinching: false,
         scrollLeft: activeScrollContainer.scrollLeft,
         scrollTop: activeScrollContainer.scrollTop,
       };
     }
 
     function handleTouchMove(event: TouchEvent) {
-      const pinch = pinchZoomRef.current;
-      if (!pinch || event.touches.length !== 2) return;
+      const gesture = tabletGestureRef.current;
+      if (!gesture || event.touches.length !== gesture.touchCount) return;
+
+      const center = getTouchCenter(event.touches);
+      gesture.maxMove = Math.max(
+        gesture.maxMove,
+        Math.hypot(center.x - gesture.startX, center.y - gesture.startY)
+      );
+
+      if (gesture.touchCount !== 2) return;
 
       const nextDistance = getTouchDistance(event.touches);
       if (nextDistance <= 0) return;
+      const distanceChange = Math.abs(nextDistance - gesture.distance);
+      gesture.maxDistanceChange = Math.max(
+        gesture.maxDistanceChange,
+        distanceChange
+      );
+
+      if (!gesture.isPinching && distanceChange < 10) return;
+      gesture.isPinching = true;
 
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
 
-      const nextZoom = clampZoom(pinch.zoom * (nextDistance / pinch.distance));
-      const zoomRatio = nextZoom / Math.max(0.01, pinch.zoom);
+      const nextZoom = clampZoom(
+        gesture.zoom * (nextDistance / gesture.distance)
+      );
+      const zoomRatio = nextZoom / Math.max(0.01, gesture.zoom);
 
       setNoteZoom(nextZoom);
 
       window.requestAnimationFrame(() => {
         activeScrollContainer.scrollLeft =
-          (pinch.scrollLeft + pinch.centerX) * zoomRatio - pinch.centerX;
+          (gesture.scrollLeft + gesture.centerX) * zoomRatio - gesture.centerX;
         activeScrollContainer.scrollTop =
-          (pinch.scrollTop + pinch.centerY) * zoomRatio - pinch.centerY;
+          (gesture.scrollTop + gesture.centerY) * zoomRatio - gesture.centerY;
       });
     }
 
     function handleTouchEnd(event: TouchEvent) {
-      if (event.touches.length < 2) {
-        pinchZoomRef.current = null;
+      const gesture = tabletGestureRef.current;
+      if (!gesture || event.touches.length > 0) return;
+
+      tabletGestureRef.current = null;
+
+      const duration = Date.now() - gesture.startTime;
+      const isTapGesture =
+        duration <= 430 &&
+        gesture.maxMove <= 28 &&
+        gesture.maxDistanceChange <= 10 &&
+        !gesture.isPinching;
+
+      if (!isTapGesture) return;
+
+      if (gesture.touchCount === 2) {
+        runTabletUndoGesture();
+        return;
+      }
+
+      if (gesture.touchCount === 3) {
+        runTabletRedoGesture();
       }
     }
 
@@ -794,6 +861,9 @@ export default function NoteEditorPage() {
         capture: true,
       });
     };
+    // Tablet gesture listeners intentionally keep stable refs for scroll/zoom
+    // while undo/redo actions read the current note state when the gesture ends.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteZoom]);
 
   function handleChangeContent(nextContent: string) {
