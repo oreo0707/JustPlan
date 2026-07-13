@@ -582,6 +582,9 @@ export function NoteObjectLayer({
     useState<DrawingPoint | null>(null);
   const [openTextBoxMenuId, setOpenTextBoxMenuId] = useState<string | null>(null);
   const [openShapeMenuId, setOpenShapeMenuId] = useState<string | null>(null);
+  const [drawingSelectionMenu, setDrawingSelectionMenu] = useState<
+    "actions" | "style" | null
+  >(null);
   const [cropImageId, setCropImageId] = useState<string | null>(null);
   const [shapeEditMode, setShapeEditMode] = useState<"points" | "resize">("points");
   const isDark = theme === "dark";
@@ -2063,63 +2066,10 @@ export function NoteObjectLayer({
               object.id === selectedObjectIds[0] && object.type === "image"
           )
         : undefined;
-    const selectedDrawing =
-      selectedObjectIds.length === 1
-        ? objects.find(
-            (object) =>
-              object.id === selectedObjectIds[0] && object.type === "drawing"
-          )
-        : undefined;
 
     return (
       <div className={objectControlPanelClass}>
         {renderMoveActionButton()}
-        {selectedDrawing && (
-          <>
-            <label
-              className={
-                isDark
-                  ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
-                  : "flex flex-col gap-1 px-2 py-1 text-gray-700"
-              }
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              Thickness: {selectedDrawing.strokeWidth ?? 4}px
-              <input
-                type="range"
-                min="1"
-                max="36"
-                value={selectedDrawing.strokeWidth ?? 4}
-                className="w-full"
-                onChange={(event) =>
-                  updateObject(selectedDrawing.id, {
-                    strokeWidth: Number(event.target.value),
-                  })
-                }
-              />
-            </label>
-            <label
-              className={
-                isDark
-                  ? "flex items-center gap-2 px-2 py-1 text-slate-100"
-                  : "flex items-center gap-2 px-2 py-1 text-gray-700"
-              }
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              Color
-              <input
-                type="color"
-                value={selectedDrawing.color ?? "#111827"}
-                className="h-8 w-10 rounded border"
-                onChange={(event) =>
-                  updateObject(selectedDrawing.id, {
-                    color: event.target.value,
-                  })
-                }
-              />
-            </label>
-          </>
-        )}
         {selectedImage && (
           <button
             type="button"
@@ -3473,6 +3423,7 @@ export function NoteObjectLayer({
     const startY = clampValue(startPoint.y, 0, drawingHeight);
     onSelectionChange([]);
     setSelectionPath([]);
+    setDrawingSelectionMenu(null);
 
     if (selectionTool === "lasso") {
       const firstPoint = { x: startX, y: startY };
@@ -3592,6 +3543,30 @@ export function NoteObjectLayer({
     (object) =>
       selectedObjectIds.includes(object.id) && object.type === "drawing"
   );
+  const hasDrawingOnlySelection =
+    selectedDrawingObjects.length > 0 &&
+    selectedDrawingObjects.length === selectedObjectIds.length;
+  const drawingSelectionBounds = hasDrawingOnlySelection
+    ? getSelectionBounds(selectedDrawingObjects.map((object) => object.id))
+    : null;
+  const drawingSelectionThicknesses = selectedDrawingObjects.map(
+    (object) => object.strokeWidth ?? 4
+  );
+  const drawingSelectionThickness =
+    drawingSelectionThicknesses.length > 0 &&
+    drawingSelectionThicknesses.every(
+      (value) => value === drawingSelectionThicknesses[0]
+    )
+      ? drawingSelectionThicknesses[0]
+      : 4;
+  const drawingSelectionThicknessLabel =
+    drawingSelectionThicknesses.length > 0 &&
+    drawingSelectionThicknesses.every(
+      (value) => value === drawingSelectionThicknesses[0]
+    )
+      ? `${drawingSelectionThicknesses[0]}px`
+      : "-";
+  const drawingSelectionColor = selectedDrawingObjects[0]?.color ?? "#111827";
 
   return (
     <div
@@ -3734,7 +3709,12 @@ export function NoteObjectLayer({
           drawingMode
         );
         const selected = selectedObjectIds.includes(object.id);
-        const showObjectControls = selected && canShowSelectionControls;
+        const showObjectControls =
+          selected &&
+          canShowSelectionControls &&
+          !(hasDrawingOnlySelection && object.type === "drawing");
+        const canFingerMoveSelectedDrawing =
+          selectionMode && selected && object.type === "drawing";
 
         if (object.type === "line") {
           const points = getLinePoints(object);
@@ -3902,7 +3882,9 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              !canObjectReceivePointer && !showObjectControls
+              !canObjectReceivePointer &&
+              !showObjectControls &&
+              !canFingerMoveSelectedDrawing
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3925,13 +3907,12 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
-              const canFingerMoveSelectedDrawing =
-                selectionMode &&
-                event.pointerType === "touch" &&
-                selected &&
-                object.type === "drawing";
-
-              if (!canObjectReceivePointer && !canFingerMoveSelectedDrawing) return;
+              if (
+                !canObjectReceivePointer &&
+                !(canFingerMoveSelectedDrawing && event.pointerType === "touch")
+              ) {
+                return;
+              }
 
               if (object.type === "textbox") {
                 event.stopPropagation();
@@ -4414,7 +4395,146 @@ export function NoteObjectLayer({
         );
       })}
 
-      {selectedGroupBounds && canShowSelectionControls && (
+      {drawingSelectionBounds && canShowSelectionControls && (
+        <>
+          <div
+            className="pointer-events-none absolute border-2 border-blue-600"
+            style={{
+              left: drawingSelectionBounds.left,
+              top: drawingSelectionBounds.top,
+              width: drawingSelectionBounds.width,
+              height: drawingSelectionBounds.height,
+              zIndex: 79,
+            }}
+          />
+          <button
+            type="button"
+            className={`pointer-events-auto absolute flex h-8 w-8 touch-none items-center justify-center rounded-full border-2 border-blue-600 text-sm shadow-sm ${
+              isDark
+                ? "bg-slate-900 text-slate-100"
+                : "bg-white text-gray-800"
+            }`}
+            title="Drawing options"
+            style={{
+              left: drawingSelectionBounds.left + drawingSelectionBounds.width + 8,
+              top: drawingSelectionBounds.top + drawingSelectionBounds.height - 16,
+              zIndex: 82,
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setDrawingSelectionMenu((current) =>
+                current === "actions" ? null : "actions"
+              );
+            }}
+          >
+            ⋯
+          </button>
+
+          {drawingSelectionMenu === "actions" && (
+            <div
+              className={selectionActionPanelClass}
+              style={{
+                left: drawingSelectionBounds.left + drawingSelectionBounds.width + 44,
+                top: drawingSelectionBounds.top + drawingSelectionBounds.height - 16,
+                zIndex: 83,
+              }}
+            >
+              {renderSelectionActionButton("Style", "Style selected strokes", () =>
+                setDrawingSelectionMenu("style")
+              )}
+              {renderSelectionActionButton(
+                "Duplicate",
+                "Duplicate selected strokes",
+                duplicateSelectedObjects
+              )}
+              {renderSelectionActionButton("Cut", "Cut selected strokes", cutSelectedObjects)}
+              {renderSelectionActionButton("Copy", "Copy selected strokes", copySelectedObjects)}
+              {renderSelectionActionButton(
+                "Delete",
+                "Delete selected strokes",
+                deleteSelectedObjects
+              )}
+            </div>
+          )}
+
+          {drawingSelectionMenu === "style" && (
+            <div
+              className={selectionActionPanelClass}
+              style={{
+                left: drawingSelectionBounds.left + drawingSelectionBounds.width + 44,
+                top: drawingSelectionBounds.top + drawingSelectionBounds.height - 16,
+                zIndex: 83,
+                width: 190,
+              }}
+            >
+              <button
+                type="button"
+                className={`${objectControlButtonClass} text-left`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDrawingSelectionMenu("actions");
+                }}
+              >
+                ← Options
+              </button>
+              <label
+                className={
+                  isDark
+                    ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
+                    : "flex flex-col gap-1 px-2 py-1 text-gray-700"
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                Thickness: {drawingSelectionThicknessLabel}
+                <input
+                  type="range"
+                  min="1"
+                  max="36"
+                  value={drawingSelectionThickness}
+                  className="w-full"
+                  onChange={(event) =>
+                    updateSelectedDrawingObjects({
+                      strokeWidth: Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label
+                className={
+                  isDark
+                    ? "flex items-center justify-between gap-2 px-2 py-1 text-slate-100"
+                    : "flex items-center justify-between gap-2 px-2 py-1 text-gray-700"
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                Color
+                <input
+                  type="color"
+                  value={drawingSelectionColor}
+                  className="h-8 w-10 rounded border"
+                  onChange={(event) =>
+                    updateSelectedDrawingObjects({
+                      color: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+        </>
+      )}
+
+      {selectedGroupBounds && canShowSelectionControls && !hasDrawingOnlySelection && (
         <>
           <div
             className="pointer-events-none absolute border-2 border-blue-600"
