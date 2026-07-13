@@ -395,6 +395,10 @@ export function NoteObjectLayer({
   const activeDrawingPointerIdRef = useRef<number | null>(null);
   const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
   const activeDrawingMinDistanceRef = useRef(1);
+  const straightLineHoldTimerRef = useRef<number | null>(null);
+  const straightLineHoldEligibleRef = useRef(false);
+  const straightLineConvertedRef = useRef(false);
+  const straightLineLastPointRef = useRef<DrawingPoint | null>(null);
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
@@ -648,6 +652,82 @@ export function NoteObjectLayer({
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
 
+  function clearStraightLineHoldTimer() {
+    if (straightLineHoldTimerRef.current === null) return;
+
+    window.clearTimeout(straightLineHoldTimerRef.current);
+    straightLineHoldTimerRef.current = null;
+  }
+
+  function convertActiveDrawingToLine() {
+    if (
+      !straightLineHoldEligibleRef.current ||
+      straightLineConvertedRef.current ||
+      drawingToolRef.current !== "draw"
+    ) {
+      return;
+    }
+
+    const points = activeDrawingPointsRef.current;
+    if (points.length < 2) return;
+
+    const firstPoint = points[0];
+    const lastPoint = points[points.length - 1];
+    const lineLength = Math.hypot(
+      lastPoint.x - firstPoint.x,
+      lastPoint.y - firstPoint.y
+    );
+
+    if (lineLength < 24) return;
+
+    const newLine: NoteObject = {
+      id: crypto.randomUUID(),
+      type: "line",
+      x: clampValue(firstPoint.x, 0, pageWidth),
+      y: clampValue(firstPoint.y, 0, drawingHeight),
+      endX: clampValue(lastPoint.x, 0, pageWidth),
+      endY: clampValue(lastPoint.y, 0, drawingHeight),
+      width: Math.max(1, Math.abs(lastPoint.x - firstPoint.x)),
+      height: Math.max(1, Math.abs(lastPoint.y - firstPoint.y)),
+      color: drawingColorRef.current,
+      strokeWidth: drawingStrokeWidthRef.current,
+      flipX: false,
+      flipY: false,
+    };
+
+    straightLineConvertedRef.current = true;
+    activeDrawingPointsRef.current = [];
+    setActiveDrawingPoints([]);
+    clearLiveDrawingCanvas();
+    clearStraightLineHoldTimer();
+
+    const nextObjects = [...objectsRef.current, newLine];
+    objectsRef.current = nextObjects;
+    onChangeObjectsRef.current(nextObjects);
+    onSelectionChangeRef.current([newLine.id]);
+  }
+
+  function scheduleStraightLineHold(point: DrawingPoint) {
+    if (!straightLineHoldEligibleRef.current || drawingToolRef.current !== "draw") {
+      return;
+    }
+
+    clearStraightLineHoldTimer();
+    straightLineLastPointRef.current = point;
+    straightLineHoldTimerRef.current = window.setTimeout(() => {
+      const lastPoint = activeDrawingPointsRef.current.at(-1);
+      const holdPoint = straightLineLastPointRef.current;
+      if (!lastPoint || !holdPoint) return;
+
+      const hasStayedStill =
+        Math.hypot(lastPoint.x - holdPoint.x, lastPoint.y - holdPoint.y) <= 3;
+
+      if (hasStayedStill) {
+        convertActiveDrawingToLine();
+      }
+    }, 560);
+  }
+
   function undoPendingDrawingStroke() {
     const previousSnapshot = pendingDrawingUndoStackRef.current.pop();
 
@@ -684,6 +764,15 @@ export function NoteObjectLayer({
   }
 
   function commitDrawingPoints(finalPoints: DrawingPoint[]) {
+    clearStraightLineHoldTimer();
+    if (straightLineConvertedRef.current) {
+      straightLineConvertedRef.current = false;
+      straightLineHoldEligibleRef.current = false;
+      straightLineLastPointRef.current = null;
+      clearLiveDrawingCanvas();
+      return;
+    }
+
     if (finalPoints.length < 2) {
       clearLiveDrawingCanvas();
       return;
@@ -733,6 +822,7 @@ export function NoteObjectLayer({
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
+    if (straightLineConvertedRef.current) return;
     if (!isPointInsidePaper(nextPoint)) return;
 
     const context = prepareLiveDrawingCanvas();
@@ -743,6 +833,7 @@ export function NoteObjectLayer({
 
     if (!previousPoint) {
       points.push(nextPoint);
+      scheduleStraightLineHold(nextPoint);
       context.beginPath();
       context.moveTo(nextPoint.x, nextPoint.y);
       context.lineTo(nextPoint.x + 0.01, nextPoint.y + 0.01);
@@ -758,6 +849,7 @@ export function NoteObjectLayer({
     if (distance < activeDrawingMinDistanceRef.current) return;
 
     points.push(nextPoint);
+    scheduleStraightLineHold(nextPoint);
     context.beginPath();
     context.moveTo(previousPoint.x, previousPoint.y);
     context.lineTo(nextPoint.x, nextPoint.y);
@@ -769,6 +861,7 @@ export function NoteObjectLayer({
       if (activeDrawingFrameRef.current !== null) {
         window.cancelAnimationFrame(activeDrawingFrameRef.current);
       }
+      clearStraightLineHoldTimer();
     };
   }, []);
 
@@ -818,7 +911,11 @@ export function NoteObjectLayer({
       };
     }
 
-    function beginCanvasStroke(id: number, point: DrawingPoint) {
+    function beginCanvasStroke(
+      id: number,
+      point: DrawingPoint,
+      canStraighten: boolean
+    ) {
       if (
         !drawingModeRef.current ||
         (drawingToolRef.current !== "draw" &&
@@ -833,6 +930,11 @@ export function NoteObjectLayer({
 
       activeDrawingPointerIdRef.current = id;
       activeDrawingMinDistanceRef.current = 0.1;
+      straightLineHoldEligibleRef.current =
+        canStraighten && drawingToolRef.current === "draw";
+      straightLineConvertedRef.current = false;
+      straightLineLastPointRef.current = null;
+      clearStraightLineHoldTimer();
       activeDrawingPointsRef.current = [];
       addLiveCanvasPoint(point);
       onSelectionChange([]);
@@ -878,7 +980,8 @@ export function NoteObjectLayer({
       canvasDrawingPointerIdRef.current = event.pointerId;
       beginCanvasStroke(
         event.pointerId,
-        getCanvasPoint(event.clientX, event.clientY)
+        getCanvasPoint(event.clientX, event.clientY),
+        event.pointerType === "pen"
       );
     }
 
@@ -943,7 +1046,8 @@ export function NoteObjectLayer({
       canvasDrawingTouchIdRef.current = touch.identifier;
       beginCanvasStroke(
         -touch.identifier - 1,
-        getCanvasPoint(touch.clientX, touch.clientY)
+        getCanvasPoint(touch.clientX, touch.clientY),
+        true
       );
     }
 
@@ -2274,6 +2378,7 @@ export function NoteObjectLayer({
   }
 
   function addActiveDrawingPoint(nextPoint: DrawingPoint) {
+    if (straightLineConvertedRef.current) return;
     if (!isPointInsidePaper(nextPoint)) return;
 
     const points = activeDrawingPointsRef.current;
@@ -2281,6 +2386,7 @@ export function NoteObjectLayer({
 
     if (!lastPoint) {
       points.push(nextPoint);
+      scheduleStraightLineHold(nextPoint);
       return;
     }
 
@@ -2289,6 +2395,7 @@ export function NoteObjectLayer({
     if (distance < activeDrawingMinDistanceRef.current) return;
 
     points.push(nextPoint);
+    scheduleStraightLineHold(nextPoint);
   }
 
   function finishActiveDrawing(pointerId: number) {
@@ -2296,6 +2403,7 @@ export function NoteObjectLayer({
 
     activeDrawingPointerIdRef.current = null;
     activeDrawingBoundsRef.current = null;
+    clearStraightLineHoldTimer();
 
     if (activeDrawingFrameRef.current !== null) {
       window.cancelAnimationFrame(activeDrawingFrameRef.current);
@@ -2305,6 +2413,13 @@ export function NoteObjectLayer({
     const finalPoints = [...activeDrawingPointsRef.current];
     activeDrawingPointsRef.current = [];
     setActiveDrawingPoints([]);
+
+    if (straightLineConvertedRef.current) {
+      straightLineConvertedRef.current = false;
+      straightLineHoldEligibleRef.current = false;
+      straightLineLastPointRef.current = null;
+      return;
+    }
 
     if (finalPoints.length < 2) return;
 
@@ -2348,7 +2463,8 @@ export function NoteObjectLayer({
   function startDrawingStroke(
     pointerId: number,
     firstPoint: DrawingPoint,
-    minPointDistance: number
+    minPointDistance: number,
+    canStraighten = false
   ) {
     if (!isPointInsidePaper(firstPoint)) {
       return;
@@ -2360,7 +2476,13 @@ export function NoteObjectLayer({
 
     activeDrawingPointerIdRef.current = pointerId;
     activeDrawingMinDistanceRef.current = minPointDistance;
+    straightLineHoldEligibleRef.current =
+      canStraighten && drawingToolRef.current === "draw";
+    straightLineConvertedRef.current = false;
+    straightLineLastPointRef.current = null;
+    clearStraightLineHoldTimer();
     activeDrawingPointsRef.current = [firstPoint];
+    scheduleStraightLineHold(firstPoint);
     setActiveDrawingPoints([firstPoint]);
     onSelectionChange([]);
   }
@@ -2383,7 +2505,12 @@ export function NoteObjectLayer({
       y: event.clientY - layerBounds.top,
     };
 
-    startDrawingStroke(event.pointerId, firstPoint, event.pointerType === "pen" ? 0.1 : 1);
+    startDrawingStroke(
+      event.pointerId,
+      firstPoint,
+      event.pointerType === "pen" ? 0.1 : 1,
+      event.pointerType === "pen"
+    );
   }
 
   useEffect(() => {
@@ -2545,7 +2672,8 @@ export function NoteObjectLayer({
           x: touch.clientX - layerBounds.left,
           y: touch.clientY - layerBounds.top,
         },
-        0.1
+        0.1,
+        true
       );
     }
 
@@ -3478,8 +3606,8 @@ export function NoteObjectLayer({
                   <div
                     className={
                       isDark
-                        ? "pointer-events-auto absolute -top-7 left-12 z-50 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
-                        : "pointer-events-auto absolute -top-7 left-12 z-50 flex items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
+                        ? "pointer-events-auto absolute -top-16 left-12 z-50 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 shadow-lg"
+                        : "pointer-events-auto absolute -top-16 left-12 z-50 flex items-center gap-2 rounded-lg border bg-white p-2 text-xs shadow-lg"
                     }
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
@@ -3597,13 +3725,29 @@ export function NoteObjectLayer({
                   </>
                 )}
                 {isVertexShape(object) && shapeEditMode === "resize" && (
-                  <div
-                    className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
-                    title="Resize proportionally"
-                    onPointerDown={(event) =>
-                      startResize(event, object, "proportional")
-                    }
-                  />
+                  <>
+                    <div
+                      className={`absolute -right-2 top-1/2 h-7 w-3 -translate-y-1/2 touch-none cursor-ew-resize rounded-full ${objectHandleClass}`}
+                      title="Resize shape width"
+                      onPointerDown={(event) =>
+                        startResize(event, object, "horizontal")
+                      }
+                    />
+                    <div
+                      className={`absolute -bottom-2 left-1/2 h-3 w-7 -translate-x-1/2 touch-none cursor-ns-resize rounded-full ${objectHandleClass}`}
+                      title="Resize shape height"
+                      onPointerDown={(event) =>
+                        startResize(event, object, "vertical")
+                      }
+                    />
+                    <div
+                      className={`absolute -right-2 -bottom-2 h-4 w-4 touch-none cursor-nwse-resize rounded-full border-2 border-blue-600 ${isDark ? "bg-slate-900 shadow-sm" : "bg-white shadow-sm"}`}
+                      title="Resize shape proportionally"
+                      onPointerDown={(event) =>
+                        startResize(event, object, "proportional")
+                      }
+                    />
+                  </>
                 )}
                 {!isVertexShape(object) &&
                   object.type !== "image" &&
