@@ -1289,6 +1289,7 @@ export function NoteObjectLayer({
     if (!previousPoint) {
       points.push(nextPoint);
       scheduleStraightLineHold(nextPoint);
+      scheduleActiveDrawingPaint();
       context.beginPath();
       context.moveTo(nextPoint.x, nextPoint.y);
       context.lineTo(nextPoint.x + 0.01, nextPoint.y + 0.01);
@@ -1305,6 +1306,7 @@ export function NoteObjectLayer({
 
     points.push(nextPoint);
     scheduleStraightLineHold(nextPoint);
+    scheduleActiveDrawingPaint();
     context.beginPath();
     context.moveTo(previousPoint.x, previousPoint.y);
     context.lineTo(nextPoint.x, nextPoint.y);
@@ -1430,6 +1432,7 @@ export function NoteObjectLayer({
       canvasDrawingTouchIdRef.current = null;
       commitDrawingPoints([...activeDrawingPointsRef.current]);
       activeDrawingPointsRef.current = [];
+      setActiveDrawingPoints([]);
     }
 
     function handlePointerDown(event: PointerEvent) {
@@ -3621,10 +3624,11 @@ export function NoteObjectLayer({
       {drawingMode && (drawingTool === "draw" || drawingTool === "highlight") && (
         <canvas
           ref={liveDrawingCanvasRef}
-          className="absolute inset-0 z-30 h-full w-full"
+          className="absolute inset-0 h-full w-full"
           style={{
             width: pageWidth,
             height: drawingHeight,
+            zIndex: 76,
             touchAction: "pan-y",
             WebkitUserSelect: "none",
             userSelect: "none",
