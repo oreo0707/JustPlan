@@ -2943,6 +2943,10 @@ export function NoteObjectLayer({
 
     function handleGestureTouchStart(event: TouchEvent) {
       if (!drawingModeRef.current) return;
+      if (event.touches.length === 2) {
+        tabletGestureRef.current = null;
+        return;
+      }
       if (event.touches.length !== 2 && event.touches.length !== 3) return;
 
       const center = getTouchCentroid(event.touches);
@@ -2964,8 +2968,6 @@ export function NoteObjectLayer({
       const gesture = tabletGestureRef.current;
       if (!gesture) return;
 
-      event.preventDefault();
-
       if (event.touches.length !== gesture.touchCount) {
         tabletGestureRef.current = null;
         return;
@@ -2984,16 +2986,10 @@ export function NoteObjectLayer({
 
       if (event.touches.length > 0) return;
 
-      event.preventDefault();
       tabletGestureRef.current = null;
 
       const duration = Date.now() - gesture.startTime;
       if (duration > 420 || gesture.maxDistance > 28) return;
-
-      if (gesture.touchCount === 2) {
-        undoPendingDrawingStroke();
-        return;
-      }
 
       redoPendingDrawingStroke();
     }

@@ -720,6 +720,8 @@ export default function NoteEditorPage() {
       const distance = getTouchDistance(event.touches);
       if (distance <= 0) return;
 
+      event.stopImmediatePropagation();
+
       const center = getTouchCenter(event.touches);
       const containerBounds = activeScrollContainer.getBoundingClientRect();
 
@@ -742,6 +744,7 @@ export default function NoteEditorPage() {
 
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
 
       const nextZoom = clampZoom(pinch.zoom * (nextDistance / pinch.distance));
       const zoomRatio = nextZoom / Math.max(0.01, pinch.zoom);
