@@ -24,6 +24,7 @@ type NoteObjectLayerProps = {
   pageWidth?: number;
   pageHeight?: number;
   pageCount?: number;
+  viewScale?: number;
 };
 
 type SelectionBox = {
@@ -465,6 +466,7 @@ export function NoteObjectLayer({
   pageWidth = 794,
   pageHeight = 1123,
   pageCount = 1,
+  viewScale = 1,
 }: NoteObjectLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const savedTextSelectionRef = useRef<Range | null>(null);
@@ -555,10 +557,41 @@ export function NoteObjectLayer({
     const layerBounds = layerRef.current?.getBoundingClientRect();
 
     if (!layerBounds) return objectClipboardAnchor;
+    const layerScale = getLayerScale(layerBounds);
 
     return {
-      x: clampValue(clientX - layerBounds.left, 0, pageWidth),
-      y: clampValue(clientY - layerBounds.top, 0, drawingHeight),
+      x: clampValue((clientX - layerBounds.left) / layerScale, 0, pageWidth),
+      y: clampValue((clientY - layerBounds.top) / layerScale, 0, drawingHeight),
+    };
+  }
+
+  function getLayerScale(layerBounds?: DOMRect | null) {
+    if (layerBounds && layerBounds.width > 0) {
+      return layerBounds.width / pageWidth;
+    }
+
+    return Math.max(0.01, viewScale);
+  }
+
+  function getLayerDelta(deltaX: number, deltaY: number) {
+    const layerScale = getLayerScale(layerRef.current?.getBoundingClientRect());
+
+    return {
+      dx: deltaX / layerScale,
+      dy: deltaY / layerScale,
+    };
+  }
+
+  function getPointInBounds(
+    clientX: number,
+    clientY: number,
+    bounds: DOMRect
+  ) {
+    const layerScale = getLayerScale(bounds);
+
+    return {
+      x: (clientX - bounds.left) / layerScale,
+      y: (clientY - bounds.top) / layerScale,
     };
   }
 
@@ -568,10 +601,11 @@ export function NoteObjectLayer({
     function handlePointerMove(event: PointerEvent) {
       const layerBounds = layerRef.current?.getBoundingClientRect();
       if (!layerBounds) return;
+      const point = getPointInBounds(event.clientX, event.clientY, layerBounds);
 
       setObjectClipboardAnchor({
-        x: clampValue(event.clientX - layerBounds.left, 0, pageWidth),
-        y: clampValue(event.clientY - layerBounds.top, 0, drawingHeight),
+        x: clampValue(point.x, 0, pageWidth),
+        y: clampValue(point.y, 0, drawingHeight),
       });
     }
 
@@ -703,7 +737,7 @@ export function NoteObjectLayer({
     const canvas = liveDrawingCanvasRef.current;
     if (!canvas) return null;
 
-    const pixelRatio = window.devicePixelRatio || 1;
+    const pixelRatio = (window.devicePixelRatio || 1) * Math.max(1, viewScale);
     const targetWidth = Math.round(pageWidth * pixelRatio);
     const targetHeight = Math.round(drawingHeight * pixelRatio);
 
@@ -1262,10 +1296,11 @@ export function NoteObjectLayer({
 
     function getCanvasPoint(clientX: number, clientY: number) {
       const canvasBounds = activeCanvas.getBoundingClientRect();
+      const canvasScale = canvasBounds.width / pageWidth || Math.max(0.01, viewScale);
 
       return {
-        x: clientX - canvasBounds.left,
-        y: clientY - canvasBounds.top,
+        x: (clientX - canvasBounds.left) / canvasScale,
+        y: (clientY - canvasBounds.top) / canvasScale,
       };
     }
 
@@ -1480,7 +1515,7 @@ export function NoteObjectLayer({
     // Canvas drawing intentionally reads current settings through refs so the
     // listeners stay stable while the user writes quickly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawingMode, drawingTool]);
+  }, [drawingMode, drawingTool, viewScale]);
 
   useEffect(() => {
     if (
@@ -2103,10 +2138,14 @@ export function NoteObjectLayer({
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const moveDelta = clampMoveDelta(
-        movingBounds,
+      const layerDelta = getLayerDelta(
         moveEvent.clientX - pointerX,
         moveEvent.clientY - pointerY
+      );
+      const moveDelta = clampMoveDelta(
+        movingBounds,
+        layerDelta.dx,
+        layerDelta.dy
       );
 
       onChangeObjects(
@@ -2191,8 +2230,10 @@ export function NoteObjectLayer({
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const dx = moveEvent.clientX - pointerX;
-      const dy = moveEvent.clientY - pointerY;
+      const { dx, dy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
 
       if (mode === "horizontal") {
         resizeObject(Math.max(30, originalWidth + dx), originalHeight);
@@ -2275,8 +2316,10 @@ export function NoteObjectLayer({
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const dx = moveEvent.clientX - pointerX;
-      const dy = moveEvent.clientY - pointerY;
+      const { dx, dy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
       const rawScale = Math.max(
         0.2,
         1 +
@@ -2356,16 +2399,24 @@ export function NoteObjectLayer({
 
     const centerX = object.x + object.width / 2;
     const centerY = object.y + object.height / 2;
+    const startPoint = getLayerPointFromClient(event.clientX, event.clientY);
+    if (!startPoint) return;
+
     const startAngle =
-      Math.atan2(event.clientY - centerY, event.clientX - centerX) *
-      (180 / Math.PI);
+      Math.atan2(startPoint.y - centerY, startPoint.x - centerX) * (180 / Math.PI);
     const originalRotation = object.rotation ?? 0;
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
+      const currentPoint = getLayerPointFromClient(
+        moveEvent.clientX,
+        moveEvent.clientY
+      );
+      if (!currentPoint) return;
+
       const currentAngle =
-        Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX) *
+        Math.atan2(currentPoint.y - centerY, currentPoint.x - centerX) *
         (180 / Math.PI);
       const nextRotation = (originalRotation + currentAngle - startAngle) % 360;
 
@@ -2410,8 +2461,10 @@ export function NoteObjectLayer({
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const rawDx = moveEvent.clientX - pointerX;
-      const rawDy = moveEvent.clientY - pointerY;
+      const { dx: rawDx, dy: rawDy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
       const nextCrop = { ...originalCrop };
       let nextX = object.x;
       let nextY = object.y;
@@ -2565,8 +2618,10 @@ export function NoteObjectLayer({
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
 
-      const dx = moveEvent.clientX - pointerX;
-      const dy = moveEvent.clientY - pointerY;
+      const { dx, dy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
 
       if (endpoint === "start") {
         const snappedStart = snapToNearbyLineEndpoint(
@@ -2685,10 +2740,8 @@ export function NoteObjectLayer({
     const erasingElement = event.currentTarget;
     const pointerId = event.pointerId;
 
-    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) => ({
-      x: pointerEvent.clientX - layerBounds.left,
-      y: pointerEvent.clientY - layerBounds.top,
-    });
+    const getPoint = (pointerEvent: PointerEvent | React.PointerEvent) =>
+      getPointInBounds(pointerEvent.clientX, pointerEvent.clientY, layerBounds);
 
     const eraserStroke = beginEraserStroke(getPoint(event));
 
@@ -2732,10 +2785,7 @@ export function NoteObjectLayer({
     const layerBounds = activeDrawingBoundsRef.current;
     if (!layerBounds) return null;
 
-    return {
-      x: pointerEvent.clientX - layerBounds.left,
-      y: pointerEvent.clientY - layerBounds.top,
-    };
+    return getPointInBounds(pointerEvent.clientX, pointerEvent.clientY, layerBounds);
   }
 
   function addActiveDrawingPoint(nextPoint: DrawingPoint) {
@@ -2861,10 +2911,7 @@ export function NoteObjectLayer({
 
     activeDrawingBoundsRef.current = layerBounds;
 
-    const firstPoint = {
-      x: event.clientX - layerBounds.left,
-      y: event.clientY - layerBounds.top,
-    };
+    const firstPoint = getPointInBounds(event.clientX, event.clientY, layerBounds);
 
     startDrawingStroke(
       event.pointerId,
@@ -2909,6 +2956,11 @@ export function NoteObjectLayer({
     }
 
     function handleGestureTouchMove(event: TouchEvent) {
+      if (event.defaultPrevented) {
+        tabletGestureRef.current = null;
+        return;
+      }
+
       const gesture = tabletGestureRef.current;
       if (!gesture) return;
 
@@ -2985,20 +3037,14 @@ export function NoteObjectLayer({
       const layerBounds = activeDrawingBoundsRef.current;
       if (!layerBounds) return null;
 
-      return {
-        x: touch.clientX - layerBounds.left,
-        y: touch.clientY - layerBounds.top,
-      };
+      return getPointInBounds(touch.clientX, touch.clientY, layerBounds);
     }
 
     function getLayerTouchPoint(touch: Touch) {
       const layerBounds = layerRef.current?.getBoundingClientRect();
       if (!layerBounds) return null;
 
-      return {
-        x: touch.clientX - layerBounds.left,
-        y: touch.clientY - layerBounds.top,
-      };
+      return getPointInBounds(touch.clientX, touch.clientY, layerBounds);
     }
 
     function handleNativeTouchStart(event: TouchEvent) {
@@ -3029,10 +3075,7 @@ export function NoteObjectLayer({
       activeDrawingBoundsRef.current = layerBounds;
       startDrawingStroke(
         -touch.identifier - 1,
-        {
-          x: touch.clientX - layerBounds.left,
-          y: touch.clientY - layerBounds.top,
-        },
+        getPointInBounds(touch.clientX, touch.clientY, layerBounds),
         0.1,
         true
       );
@@ -3225,13 +3268,17 @@ export function NoteObjectLayer({
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
+      const { dx, dy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
 
       const movedVertices = absoluteVertices.map((vertex, index) =>
         index === vertexIndex
           ? {
-              x: clampValue(vertex.x + moveEvent.clientX - pointerX, 0, pageWidth),
+              x: clampValue(vertex.x + dx, 0, pageWidth),
               y: clampValue(
-                vertex.y + moveEvent.clientY - pointerY,
+                vertex.y + dy,
                 0,
                 drawingHeight
               ),
@@ -3278,12 +3325,12 @@ export function NoteObjectLayer({
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
 
+    const selectionBounds = layerBounds;
     const selectionElement = event.currentTarget;
     const pointerId = event.pointerId;
-    const layerLeft = layerBounds.left;
-    const layerTop = layerBounds.top;
-    const startX = clampValue(event.clientX - layerLeft, 0, pageWidth);
-    const startY = clampValue(event.clientY - layerTop, 0, drawingHeight);
+    const startPoint = getPointInBounds(event.clientX, event.clientY, selectionBounds);
+    const startX = clampValue(startPoint.x, 0, pageWidth);
+    const startY = clampValue(startPoint.y, 0, drawingHeight);
     onSelectionChange([]);
     setSelectionPath([]);
 
@@ -3298,9 +3345,14 @@ export function NoteObjectLayer({
         moveEvent.preventDefault();
         moveEvent.stopPropagation();
 
+        const rawNextPoint = getPointInBounds(
+          moveEvent.clientX,
+          moveEvent.clientY,
+          selectionBounds
+        );
         const nextPoint = {
-          x: clampValue(moveEvent.clientX - layerLeft, 0, pageWidth),
-          y: clampValue(moveEvent.clientY - layerTop, 0, drawingHeight),
+          x: clampValue(rawNextPoint.x, 0, pageWidth),
+          y: clampValue(rawNextPoint.y, 0, drawingHeight),
         };
         const lastPoint = pathPoints[pathPoints.length - 1];
 
@@ -3345,12 +3397,13 @@ export function NoteObjectLayer({
       moveEvent.preventDefault();
       moveEvent.stopPropagation();
 
-      const currentX = clampValue(moveEvent.clientX - layerLeft, 0, pageWidth);
-      const currentY = clampValue(
-        moveEvent.clientY - layerTop,
-        0,
-        drawingHeight
+      const currentPoint = getPointInBounds(
+        moveEvent.clientX,
+        moveEvent.clientY,
+        selectionBounds
       );
+      const currentX = clampValue(currentPoint.x, 0, pageWidth);
+      const currentY = clampValue(currentPoint.y, 0, drawingHeight);
       const box = {
         left: Math.min(startX, currentX),
         top: Math.min(startY, currentY),

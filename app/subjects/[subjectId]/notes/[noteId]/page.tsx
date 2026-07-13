@@ -76,12 +76,21 @@ export default function NoteEditorPage() {
   const [isNoteSaved, setIsNoteSaved] = useState(false);
   const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
   const [drawingRedoRequestId, setDrawingRedoRequestId] = useState(0);
+  const [noteZoom, setNoteZoom] = useState(1);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
   const pendingDrawingCountRef = useRef(0);
   const skipNextObjectDirtyMarkRef = useRef(false);
   const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
+  const pinchZoomRef = useRef<{
+    distance: number;
+    zoom: number;
+    centerX: number;
+    centerY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const undoStackRef = useRef<
     Array<{
       content: string;
@@ -666,6 +675,123 @@ export default function NoteEditorPage() {
   function handlePendingDrawingCountChange(count: number) {
     pendingDrawingCountRef.current = count;
   }
+
+  function clampZoom(value: number) {
+    return Math.min(2.2, Math.max(0.6, value));
+  }
+
+  function getTouchDistance(touches: TouchList) {
+    const firstTouch = touches[0];
+    const secondTouch = touches[1];
+
+    if (!firstTouch || !secondTouch) return 0;
+
+    return Math.hypot(
+      secondTouch.clientX - firstTouch.clientX,
+      secondTouch.clientY - firstTouch.clientY
+    );
+  }
+
+  function getTouchCenter(touches: TouchList) {
+    const firstTouch = touches[0];
+    const secondTouch = touches[1];
+
+    if (!firstTouch || !secondTouch) {
+      return { x: 0, y: 0 };
+    }
+
+    return {
+      x: (firstTouch.clientX + secondTouch.clientX) / 2,
+      y: (firstTouch.clientY + secondTouch.clientY) / 2,
+    };
+  }
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    const activeScrollContainer = scrollContainer;
+
+    function handleTouchStart(event: TouchEvent) {
+      if (event.touches.length !== 2) {
+        pinchZoomRef.current = null;
+        return;
+      }
+
+      const distance = getTouchDistance(event.touches);
+      if (distance <= 0) return;
+
+      const center = getTouchCenter(event.touches);
+      const containerBounds = activeScrollContainer.getBoundingClientRect();
+
+      pinchZoomRef.current = {
+        distance,
+        zoom: noteZoom,
+        centerX: center.x - containerBounds.left,
+        centerY: center.y - containerBounds.top,
+        scrollLeft: activeScrollContainer.scrollLeft,
+        scrollTop: activeScrollContainer.scrollTop,
+      };
+    }
+
+    function handleTouchMove(event: TouchEvent) {
+      const pinch = pinchZoomRef.current;
+      if (!pinch || event.touches.length !== 2) return;
+
+      const nextDistance = getTouchDistance(event.touches);
+      if (nextDistance <= 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nextZoom = clampZoom(pinch.zoom * (nextDistance / pinch.distance));
+      const zoomRatio = nextZoom / Math.max(0.01, pinch.zoom);
+
+      setNoteZoom(nextZoom);
+
+      window.requestAnimationFrame(() => {
+        activeScrollContainer.scrollLeft =
+          (pinch.scrollLeft + pinch.centerX) * zoomRatio - pinch.centerX;
+        activeScrollContainer.scrollTop =
+          (pinch.scrollTop + pinch.centerY) * zoomRatio - pinch.centerY;
+      });
+    }
+
+    function handleTouchEnd(event: TouchEvent) {
+      if (event.touches.length < 2) {
+        pinchZoomRef.current = null;
+      }
+    }
+
+    activeScrollContainer.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+      capture: true,
+    });
+    activeScrollContainer.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+      capture: true,
+    });
+    activeScrollContainer.addEventListener("touchend", handleTouchEnd, {
+      capture: true,
+    });
+    activeScrollContainer.addEventListener("touchcancel", handleTouchEnd, {
+      capture: true,
+    });
+
+    return () => {
+      activeScrollContainer.removeEventListener("touchstart", handleTouchStart, {
+        capture: true,
+      });
+      activeScrollContainer.removeEventListener("touchmove", handleTouchMove, {
+        capture: true,
+      });
+      activeScrollContainer.removeEventListener("touchend", handleTouchEnd, {
+        capture: true,
+      });
+      activeScrollContainer.removeEventListener("touchcancel", handleTouchEnd, {
+        capture: true,
+      });
+    };
+  }, [noteZoom]);
 
   function handleChangeContent(nextContent: string) {
     setContent(nextContent);
@@ -3008,63 +3134,76 @@ function addTextBox() {
         </div>
 
         <div
-          ref={canvasRef}
-          className="print-note-canvas relative mx-auto"
-          style={{ minHeight: canvasMinimumHeight, width: canvasWidth }}
-          onPointerDown={() => {
-            if (!isObjectSelectionMode && !isDrawingMode) {
-              setSelectedObjectIds([]);
-            }
+          className="print-note-zoom-frame mx-auto"
+          style={{
+            width: pageWidth * noteZoom,
+            minHeight: canvasPixelHeight * noteZoom,
           }}
         >
-          <PaperBackground
-            template={template}
-            minimumHeight={canvasMinimumHeight}
-            pageCount={pageCount}
-            pageHeight={pageHeight}
-            theme={data.settings.theme}
+          <div
+            ref={canvasRef}
+            className="print-note-canvas relative origin-top-left"
+            style={{
+              minHeight: canvasMinimumHeight,
+              width: canvasWidth,
+              transform: `scale(${noteZoom})`,
+            }}
+            onPointerDown={() => {
+              if (!isObjectSelectionMode && !isDrawingMode) {
+                setSelectedObjectIds([]);
+              }
+            }}
           >
-            <RichNoteEditor
-              content={content}
-              onChange={handleChangeContent}
+            <PaperBackground
+              template={template}
               minimumHeight={canvasMinimumHeight}
-              defaultFontFamily={data.settings.default_font_family}
-              defaultFontSize={data.settings.default_font_size}
-              theme={data.settings.theme}
-              sharedColor={shapeColor}
-              onSharedColorChange={setShapeColor}
-              toolbarControls={noteObjectToolbarControls}
-              onContentHeightChange={setTextContentHeight}
+              pageCount={pageCount}
               pageHeight={pageHeight}
-            />
-          </PaperBackground>
+              theme={data.settings.theme}
+            >
+              <RichNoteEditor
+                content={content}
+                onChange={handleChangeContent}
+                minimumHeight={canvasMinimumHeight}
+                defaultFontFamily={data.settings.default_font_family}
+                defaultFontSize={data.settings.default_font_size}
+                theme={data.settings.theme}
+                sharedColor={shapeColor}
+                onSharedColorChange={setShapeColor}
+                toolbarControls={noteObjectToolbarControls}
+                onContentHeightChange={setTextContentHeight}
+                pageHeight={pageHeight}
+              />
+            </PaperBackground>
 
-          <NoteObjectLayer
-            objects={objects}
-            selectedObjectIds={selectedObjectIds}
-            onSelectionChange={setSelectedObjectIds}
-            onChangeObjects={handleChangeObjects}
-            selectionMode={isObjectSelectionMode}
-            selectionTool={selectionTool}
-            drawingMode={isDrawingMode}
-            drawingTool={drawingTool}
-            drawingColor={shapeColor}
-            drawingStrokeWidth={
-              drawingTool === "erase"
-                ? eraserStrokeWidth
-                : drawingTool === "highlight"
-                  ? highlighterStrokeWidth
-                  : drawingStrokeWidth
-            }
-            theme={data.settings.theme}
-            saveRequestId={saveRequestId}
-            undoRequestId={drawingUndoRequestId}
-            redoRequestId={drawingRedoRequestId}
-            onPendingDrawingCountChange={handlePendingDrawingCountChange}
-            pageWidth={pageWidth}
-            pageHeight={pageHeight}
-            pageCount={pageCount}
-          />
+            <NoteObjectLayer
+              objects={objects}
+              selectedObjectIds={selectedObjectIds}
+              onSelectionChange={setSelectedObjectIds}
+              onChangeObjects={handleChangeObjects}
+              selectionMode={isObjectSelectionMode}
+              selectionTool={selectionTool}
+              drawingMode={isDrawingMode}
+              drawingTool={drawingTool}
+              drawingColor={shapeColor}
+              drawingStrokeWidth={
+                drawingTool === "erase"
+                  ? eraserStrokeWidth
+                  : drawingTool === "highlight"
+                    ? highlighterStrokeWidth
+                    : drawingStrokeWidth
+              }
+              theme={data.settings.theme}
+              saveRequestId={saveRequestId}
+              undoRequestId={drawingUndoRequestId}
+              redoRequestId={drawingRedoRequestId}
+              onPendingDrawingCountChange={handlePendingDrawingCountChange}
+              pageWidth={pageWidth}
+              pageHeight={pageHeight}
+              pageCount={pageCount}
+              viewScale={noteZoom}
+            />
+          </div>
         </div>
       </section>
     </main>
