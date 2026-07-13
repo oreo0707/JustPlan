@@ -97,8 +97,6 @@ export default function NoteEditorPage() {
     isPinching: boolean;
     scrollLeft: number;
     scrollTop: number;
-    panLastX?: number;
-    panLastY?: number;
   } | null>(null);
   const undoStackRef = useRef<
     Array<{
@@ -715,22 +713,7 @@ export default function NoteEditorPage() {
     };
   }
 
-  function isStylusTouch(touch: Touch) {
-    return (touch as Touch & { touchType?: string }).touchType === "stylus";
-  }
-
-  function isInteractiveTouchTarget(target: EventTarget | null) {
-    return (
-      target instanceof HTMLElement &&
-      Boolean(
-        target.closest(
-          "button, a, input, select, textarea, [contenteditable='true'], [role='button']"
-        )
-      )
-    );
-  }
-
-  function runTabletUndoGesture() {
+  function handleUndoButton() {
     if (pendingDrawingCountRef.current > 0) {
       setDrawingUndoRequestId((current) => current + 1);
       return;
@@ -743,7 +726,7 @@ export default function NoteEditorPage() {
     applyUndoSnapshot();
   }
 
-  function runTabletRedoGesture() {
+  function handleRedoButton() {
     setDrawingRedoRequestId((current) => current + 1);
     if (redoLatestSavedDrawingStroke()) {
       return;
@@ -766,40 +749,7 @@ export default function NoteEditorPage() {
         return;
       }
 
-      if (
-        isDrawingMode &&
-        event.touches.length === 1 &&
-        !isInteractiveTouchTarget(event.target)
-      ) {
-        const touch = event.touches[0];
-        if (!touch || isStylusTouch(touch)) {
-          tabletGestureRef.current = null;
-          return;
-        }
-
-        event.preventDefault();
-
-        tabletGestureRef.current = {
-          touchCount: 1,
-          distance: 0,
-          zoom: noteZoom,
-          centerX: touch.clientX,
-          centerY: touch.clientY,
-          startX: touch.clientX,
-          startY: touch.clientY,
-          startTime: Date.now(),
-          maxMove: 0,
-          maxDistanceChange: 0,
-          isPinching: false,
-          scrollLeft: activeScrollContainer.scrollLeft,
-          scrollTop: activeScrollContainer.scrollTop,
-          panLastX: touch.clientX,
-          panLastY: touch.clientY,
-        };
-        return;
-      }
-
-      if (event.touches.length !== 2 && event.touches.length !== 3) {
+      if (event.touches.length !== 2) {
         tabletGestureRef.current = null;
         return;
       }
@@ -836,30 +786,6 @@ export default function NoteEditorPage() {
       if (!gesture || event.touches.length !== gesture.touchCount) return;
 
       event.preventDefault();
-
-      if (gesture.touchCount === 1) {
-        const touch = event.touches[0];
-        if (!touch || isStylusTouch(touch)) return;
-
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-
-        const lastX = gesture.panLastX ?? touch.clientX;
-        const lastY = gesture.panLastY ?? touch.clientY;
-        const deltaX = touch.clientX - lastX;
-        const deltaY = touch.clientY - lastY;
-
-        activeScrollContainer.scrollLeft -= deltaX;
-        activeScrollContainer.scrollTop -= deltaY;
-        gesture.panLastX = touch.clientX;
-        gesture.panLastY = touch.clientY;
-        gesture.maxMove = Math.max(
-          gesture.maxMove,
-          Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY)
-        );
-        return;
-      }
-
       event.stopPropagation();
       event.stopImmediatePropagation();
 
@@ -909,25 +835,6 @@ export default function NoteEditorPage() {
       tabletGestureRef.current = null;
       gestureStartedInsideNote = false;
 
-      const duration = Date.now() - gesture.startTime;
-      if (gesture.touchCount === 1) return;
-
-      const isTapGesture =
-        duration <= 430 &&
-        gesture.maxMove <= 28 &&
-        gesture.maxDistanceChange <= 10 &&
-        !gesture.isPinching;
-
-      if (!isTapGesture) return;
-
-      if (gesture.touchCount === 2) {
-        runTabletUndoGesture();
-        return;
-      }
-
-      if (gesture.touchCount === 3) {
-        runTabletRedoGesture();
-      }
     }
 
     window.addEventListener("touchstart", handleTouchStart, {
@@ -959,9 +866,6 @@ export default function NoteEditorPage() {
         capture: true,
       });
     };
-    // Tablet gesture listeners intentionally keep stable refs for scroll/zoom
-    // while undo/redo actions read the current note state when the gesture ends.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteZoom]);
 
   function handleChangeContent(nextContent: string) {
@@ -2556,7 +2460,7 @@ function addTextBox() {
     <main
       ref={scrollContainerRef}
       className={notePageClass}
-      style={{ touchAction: isDrawingMode ? "none" : "pan-y" }}
+      style={{ touchAction: "pan-y" }}
     >
       <Link
         href={`/subjects/${subjectId}`}
@@ -2565,6 +2469,25 @@ function addTextBox() {
       >
         ←
       </Link>
+
+      <div className="no-print fixed left-16 top-4 z-[10001] flex items-center gap-2">
+        <button
+          type="button"
+          className={noteTopButtonClass}
+          onClick={handleUndoButton}
+          title="Undo"
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          className={noteTopButtonClass}
+          onClick={handleRedoButton}
+          title="Redo"
+        >
+          Redo
+        </button>
+      </div>
 
       <header className={noteHeaderClass}>
         <h1 className={isDarkNoteTheme ? "text-xl font-bold text-slate-100" : "text-xl font-bold text-gray-950"}>
