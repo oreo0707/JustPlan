@@ -7,6 +7,7 @@ import type { AppData, NoteMaterial, Subject } from "@/lib/types";
 import { defaultData } from "@/lib/default-data";
 import { loadData, saveData } from "@/lib/storage";
 import {
+  addImportedEditableNoteToSubject,
   addMaterialNoteToSubject,
   addNoteToSubject,
   addTaskToSubject,
@@ -18,6 +19,7 @@ import {
   updateSubjectName,
   updateTaskDetails,
 } from "@/lib/study-actions";
+import { importEditableNoteFile } from "@/lib/note-transfer";
 import { storeMaterialFile } from "@/lib/material-storage";
 import { TaskCard, type TaskEditValues } from "@/components/TaskCard";
 import { NoteCard } from "@/components/NoteCard";
@@ -38,6 +40,7 @@ export default function SubjectPage() {
   const [noteTitle, setNoteTitle] = useState("");
   const [showNoteMenu, setShowNoteMenu] = useState(false);
   const [isImportingMaterial, setIsImportingMaterial] = useState(false);
+  const [isImportingEditableNote, setIsImportingEditableNote] = useState(false);
   const [isEditingSubjectName, setIsEditingSubjectName] = useState(false);
   const [subjectNameDraft, setSubjectNameDraft] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -179,6 +182,29 @@ async function handleImportMaterialNote(file: File) {
     setShowNoteMenu(false);
   } finally {
     setIsImportingMaterial(false);
+  }
+}
+
+async function handleImportEditableNote(file: File) {
+  if (!file.name.toLowerCase().endsWith(".justplan-note")) {
+    window.alert("Please import a .justplan-note file.");
+    return;
+  }
+
+  setIsImportingEditableNote(true);
+
+  try {
+    const importedNote = await importEditableNoteFile(file);
+    setData(addImportedEditableNoteToSubject(data, subjectId, importedNote));
+    setShowNoteMenu(false);
+  } catch (error) {
+    window.alert(
+      error instanceof Error
+        ? error.message
+        : "Unable to import this editable note."
+    );
+  } finally {
+    setIsImportingEditableNote(false);
   }
 }
 
@@ -440,6 +466,25 @@ function handleSaveSubjectName() {
                           if (!file) return;
 
                           await handleImportMaterialNote(file);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+
+                    <label className="mt-1 block cursor-pointer rounded-lg px-3 py-2 hover:bg-gray-50">
+                      {isImportingEditableNote
+                        ? "Importing..."
+                        : "Import editable note"}
+                      <input
+                        type="file"
+                        accept=".justplan-note,application/json"
+                        className="hidden"
+                        disabled={isImportingEditableNote}
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+
+                          await handleImportEditableNote(file);
                           event.target.value = "";
                         }}
                       />

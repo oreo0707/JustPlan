@@ -435,6 +435,32 @@ export function addMaterialNoteToSubject(
   };
 }
 
+export function addImportedEditableNoteToSubject(
+  data: AppData,
+  subjectId: string,
+  note: Note
+): AppData {
+  return {
+    ...data,
+    subjects: data.subjects.map((subject) => {
+      if (subject.id !== subjectId) {
+        return subject;
+      }
+
+      return {
+        ...subject,
+        notes: [
+          ...subject.notes,
+          {
+            ...note,
+            position: subject.notes.length,
+          },
+        ],
+      };
+    }),
+  };
+}
+
 export function updateNoteContent(
   data: AppData,
   subjectId: string,

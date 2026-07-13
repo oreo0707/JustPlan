@@ -23,6 +23,7 @@ import { RichNoteEditor } from "@/components/RichNoteEditor";
 import { NoteObjectLayer } from "@/components/NoteObjectLayer";
 import { StoredImage } from "@/components/StoredImage";
 import { storeImageDataUrl } from "@/lib/image-storage";
+import { createEditableNoteFile } from "@/lib/note-transfer";
 
 export default function NoteEditorPage() {
   const params = useParams<{
@@ -944,6 +945,60 @@ export default function NoteEditorPage() {
     downloadLink.download = file.name;
     downloadLink.click();
     URL.revokeObjectURL(fileUrl);
+  }
+
+  function downloadFile(file: File) {
+    const fileUrl = URL.createObjectURL(file);
+    const downloadLink = document.createElement("a");
+
+    downloadLink.href = fileUrl;
+    downloadLink.download = file.name;
+    downloadLink.rel = "noopener";
+    downloadLink.style.display = "none";
+
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
+  }
+
+  async function handleExportEditableNote() {
+    if (!note) return;
+
+    setSelectedObjectIds([]);
+    setShowNoteMenu(false);
+    setShowPagePanel(false);
+    setShowAddMenu(false);
+    setShowDrawMenu(false);
+    setShowSelectMenu(false);
+    setShowStickerPicker(false);
+    setIsObjectSelectionMode(false);
+
+    const exportNote: Note = {
+      ...note,
+      content,
+      template,
+      objects,
+      page_count: pageCount,
+      page_bookmarks: pageBookmarks,
+      updated_at: new Date().toISOString(),
+    };
+    const file = await createEditableNoteFile(exportNote);
+
+    try {
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: exportNote.title,
+          files: [file],
+        });
+        return;
+      }
+    } catch (error) {
+      console.warn("Editable note sharing was blocked. Downloading instead.", error);
+    }
+
+    downloadFile(file);
   }
 
   function addSticker(src: string) {
@@ -2306,6 +2361,14 @@ function addTextBox() {
                   onClick={handleSharePdf}
                 >
                   Share as PDF
+                </button>
+
+                <button
+                  type="button"
+                  className={isDarkNoteTheme ? "mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800" : "mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm"}
+                  onClick={() => void handleExportEditableNote()}
+                >
+                  Export editable note
                 </button>
 
                 <button

@@ -51,6 +51,10 @@ const NOTE_FONT_FAMILIES = [
 
 const NOTE_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36];
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function getLinePoints(object: NoteObject) {
   if (object.endX !== undefined && object.endY !== undefined) {
     return {
@@ -218,6 +222,89 @@ function eraseDrawingAtPoint(
         index === 0 ? object.id : crypto.randomUUID()
       )
     ),
+  };
+}
+
+function createLineSegmentFromProgress(
+  source: NoteObject,
+  points: ReturnType<typeof getLinePoints>,
+  startProgress: number,
+  endProgress: number,
+  id: string
+) {
+  const startX =
+    points.startX + (points.endX - points.startX) * startProgress;
+  const startY =
+    points.startY + (points.endY - points.startY) * startProgress;
+  const endX = points.startX + (points.endX - points.startX) * endProgress;
+  const endY = points.startY + (points.endY - points.startY) * endProgress;
+
+  return {
+    ...source,
+    id,
+    x: startX,
+    y: startY,
+    endX,
+    endY,
+    width: Math.max(1, Math.abs(endX - startX)),
+    height: Math.max(1, Math.abs(endY - startY)),
+  };
+}
+
+function eraseLineAtPoint(
+  object: NoteObject,
+  point: DrawingPoint,
+  hitRadius: number
+) {
+  if (object.type !== "line") {
+    return { changed: false, objects: [object] };
+  }
+
+  const linePoints = getLinePoints(object);
+  const segmentStart = { x: linePoints.startX, y: linePoints.startY };
+  const segmentEnd = { x: linePoints.endX, y: linePoints.endY };
+
+  if (getDistanceToSegment(point, segmentStart, segmentEnd) > hitRadius) {
+    return { changed: false, objects: [object] };
+  }
+
+  const segmentX = segmentEnd.x - segmentStart.x;
+  const segmentY = segmentEnd.y - segmentStart.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+  const segmentLength = Math.sqrt(segmentLengthSquared);
+
+  if (segmentLength < 1) {
+    return { changed: true, objects: [] };
+  }
+
+  const progress = clampNumber(
+    ((point.x - segmentStart.x) * segmentX +
+      (point.y - segmentStart.y) * segmentY) /
+      segmentLengthSquared,
+    0,
+    1
+  );
+  const eraseProgress = Math.min(0.45, hitRadius / segmentLength);
+  const keptRanges: Array<[number, number]> = [
+    [0, Math.max(0, progress - eraseProgress)],
+    [Math.min(1, progress + eraseProgress), 1],
+  ];
+
+  const objects = keptRanges
+    .filter(([start, end]) => (end - start) * segmentLength >= 8)
+    .map(([start, end], index) =>
+      createLineSegmentFromProgress(
+        object,
+        linePoints,
+        start,
+        end,
+        index === 0 ? object.id : crypto.randomUUID()
+      )
+    );
+
+  return {
+    changed: true,
+    objects,
   };
 }
 
@@ -659,7 +746,281 @@ export function NoteObjectLayer({
     straightLineHoldTimerRef.current = null;
   }
 
-  function convertActiveDrawingToLine() {
+  function getStrokeBounds(points: DrawingPoint[]) {
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    const right = Math.max(...xs);
+    const bottom = Math.max(...ys);
+
+    return {
+      left,
+      top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+      right,
+      bottom,
+    };
+  }
+
+  function getStrokeLength(points: DrawingPoint[]) {
+    return points.slice(1).reduce((total, point, index) => {
+      const previous = points[index];
+      return total + Math.hypot(point.x - previous.x, point.y - previous.y);
+    }, 0);
+  }
+
+  function getMaxDistanceFromSegment(
+    points: DrawingPoint[],
+    start: DrawingPoint,
+    end: DrawingPoint
+  ) {
+    return points.reduce(
+      (maxDistance, point) =>
+        Math.max(maxDistance, getDistanceToSegment(point, start, end)),
+      0
+    );
+  }
+
+  function simplifyStrokePoints(
+    points: DrawingPoint[],
+    tolerance: number
+  ): DrawingPoint[] {
+    if (points.length <= 2) return points;
+
+    let maxDistance = 0;
+    let splitIndex = 0;
+    const firstPoint = points[0];
+    const lastPoint = points[points.length - 1];
+
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const distance = getDistanceToSegment(
+        points[index],
+        firstPoint,
+        lastPoint
+      );
+
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        splitIndex = index;
+      }
+    }
+
+    if (maxDistance <= tolerance) {
+      return [firstPoint, lastPoint];
+    }
+
+    const left: DrawingPoint[] = simplifyStrokePoints(
+      points.slice(0, splitIndex + 1),
+      tolerance
+    );
+    const right: DrawingPoint[] = simplifyStrokePoints(
+      points.slice(splitIndex),
+      tolerance
+    );
+
+    return [...left.slice(0, -1), ...right];
+  }
+
+  function getShapeBaseFromStroke(points: DrawingPoint[]) {
+    const bounds = getStrokeBounds(points);
+    const padding = Math.max(4, drawingStrokeWidthRef.current / 2);
+    const left = clampValue(bounds.left - padding, 0, pageWidth);
+    const top = clampValue(bounds.top - padding, 0, drawingHeight);
+    const right = clampValue(bounds.right + padding, 0, pageWidth);
+    const bottom = clampValue(bounds.bottom + padding, 0, drawingHeight);
+
+    return {
+      x: left,
+      y: top,
+      width: Math.max(8, right - left),
+      height: Math.max(8, bottom - top),
+    };
+  }
+
+  function getSquareLikeBase(base: { x: number; y: number; width: number; height: number }) {
+    const size = Math.min(Math.max(base.width, base.height), pageWidth, drawingHeight);
+    const centerX = base.x + base.width / 2;
+    const centerY = base.y + base.height / 2;
+
+    return {
+      x: clampValue(centerX - size / 2, 0, Math.max(0, pageWidth - size)),
+      y: clampValue(centerY - size / 2, 0, Math.max(0, drawingHeight - size)),
+      width: size,
+      height: size,
+    };
+  }
+
+  function shouldSnapToSquare(base: { width: number; height: number }) {
+    const aspectRatio = base.width / Math.max(1, base.height);
+    return aspectRatio >= 0.82 && aspectRatio <= 1.22;
+  }
+
+  function createRecognizedStrokeObject(points: DrawingPoint[]): NoteObject | null {
+    if (points.length < 2) return null;
+
+    const firstPoint = points[0];
+    const lastPoint = points[points.length - 1];
+    const bounds = getStrokeBounds(points);
+    const diagonal = Math.hypot(bounds.width, bounds.height);
+    const strokeLength = getStrokeLength(points);
+    const endDistance = Math.hypot(
+      lastPoint.x - firstPoint.x,
+      lastPoint.y - firstPoint.y
+    );
+    const isClosed = endDistance <= Math.max(28, diagonal * 0.22);
+    const maxLineDistance = getMaxDistanceFromSegment(
+      points,
+      firstPoint,
+      lastPoint
+    );
+
+    if (
+      endDistance >= 24 &&
+      (strokeLength <= endDistance * 1.22 ||
+        maxLineDistance <= Math.max(10, drawingStrokeWidthRef.current * 2.4))
+    ) {
+      return {
+        id: crypto.randomUUID(),
+        type: "line" as const,
+        x: clampValue(firstPoint.x, 0, pageWidth),
+        y: clampValue(firstPoint.y, 0, drawingHeight),
+        endX: clampValue(lastPoint.x, 0, pageWidth),
+        endY: clampValue(lastPoint.y, 0, drawingHeight),
+        width: Math.max(1, Math.abs(lastPoint.x - firstPoint.x)),
+        height: Math.max(1, Math.abs(lastPoint.y - firstPoint.y)),
+        color: drawingColorRef.current,
+        strokeWidth: drawingStrokeWidthRef.current,
+        flipX: false,
+        flipY: false,
+      };
+    }
+
+    if (!isClosed || diagonal < 28) return null;
+
+    const base = getShapeBaseFromStroke(points);
+    const tolerance = Math.max(8, diagonal * 0.045);
+    let simplified = simplifyStrokePoints(points, tolerance);
+    simplified = simplified.filter((point, index) => {
+      if (index === 0) return true;
+      const previous = simplified[index - 1];
+      return Math.hypot(point.x - previous.x, point.y - previous.y) > 8;
+    });
+
+    if (
+      simplified.length > 2 &&
+      Math.hypot(
+        simplified[0].x - simplified[simplified.length - 1].x,
+        simplified[0].y - simplified[simplified.length - 1].y
+      ) <= Math.max(18, diagonal * 0.12)
+    ) {
+      simplified = simplified.slice(0, -1);
+    }
+
+    const center = {
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2,
+    };
+    const ellipseDistances = points.map((point) => {
+      const normalizedX = (point.x - center.x) / Math.max(1, bounds.width / 2);
+      const normalizedY = (point.y - center.y) / Math.max(1, bounds.height / 2);
+      return Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+    });
+    const ellipseError =
+      ellipseDistances.reduce(
+        (total, distance) => total + Math.abs(distance - 1),
+        0
+      ) / Math.max(1, ellipseDistances.length);
+
+    if (ellipseError <= 0.2 && simplified.length > 5) {
+      const ellipseBase = shouldSnapToSquare(base) ? getSquareLikeBase(base) : base;
+
+      return {
+        id: crypto.randomUUID(),
+        type: "circle" as const,
+        x: ellipseBase.x,
+        y: ellipseBase.y,
+        width: ellipseBase.width,
+        height: ellipseBase.height,
+        color: drawingColorRef.current,
+        strokeWidth: drawingStrokeWidthRef.current,
+        filled: false,
+        flipX: false,
+        flipY: false,
+      };
+    }
+
+    const vertices = simplified
+      .slice(0, 10)
+      .map((point) => ({
+        x: clampValue(point.x - base.x, 0, base.width),
+        y: clampValue(point.y - base.y, 0, base.height),
+      }));
+
+    if (vertices.length === 3) {
+      return {
+        id: crypto.randomUUID(),
+        type: "triangle" as const,
+        ...base,
+        vertices,
+        color: drawingColorRef.current,
+        strokeWidth: drawingStrokeWidthRef.current,
+        filled: false,
+        flipX: false,
+        flipY: false,
+      };
+    }
+
+    if (vertices.length >= 4 && vertices.length <= 6) {
+      const rectangleBase = shouldSnapToSquare(base)
+        ? getSquareLikeBase(base)
+        : {
+            x: base.x,
+            y: base.y,
+            width: base.width,
+            height: base.height,
+          };
+
+      return {
+        id: crypto.randomUUID(),
+        type: "rectangle" as const,
+        x: rectangleBase.x,
+        y: rectangleBase.y,
+        width: rectangleBase.width,
+        height: rectangleBase.height,
+        vertices: [
+          { x: 0, y: 0 },
+          { x: rectangleBase.width, y: 0 },
+          { x: rectangleBase.width, y: rectangleBase.height },
+          { x: 0, y: rectangleBase.height },
+        ],
+        color: drawingColorRef.current,
+        strokeWidth: drawingStrokeWidthRef.current,
+        filled: false,
+        flipX: false,
+        flipY: false,
+      };
+    }
+
+    if (vertices.length >= 3) {
+      return {
+        id: crypto.randomUUID(),
+        type: "rectangle" as const,
+        ...base,
+        vertices,
+        color: drawingColorRef.current,
+        strokeWidth: drawingStrokeWidthRef.current,
+        filled: false,
+        flipX: false,
+        flipY: false,
+      };
+    }
+
+    return null;
+  }
+
+  function convertActiveDrawingToRecognizedShape() {
     if (
       !straightLineHoldEligibleRef.current ||
       straightLineConvertedRef.current ||
@@ -671,29 +1032,8 @@ export function NoteObjectLayer({
     const points = activeDrawingPointsRef.current;
     if (points.length < 2) return;
 
-    const firstPoint = points[0];
-    const lastPoint = points[points.length - 1];
-    const lineLength = Math.hypot(
-      lastPoint.x - firstPoint.x,
-      lastPoint.y - firstPoint.y
-    );
-
-    if (lineLength < 24) return;
-
-    const newLine: NoteObject = {
-      id: crypto.randomUUID(),
-      type: "line",
-      x: clampValue(firstPoint.x, 0, pageWidth),
-      y: clampValue(firstPoint.y, 0, drawingHeight),
-      endX: clampValue(lastPoint.x, 0, pageWidth),
-      endY: clampValue(lastPoint.y, 0, drawingHeight),
-      width: Math.max(1, Math.abs(lastPoint.x - firstPoint.x)),
-      height: Math.max(1, Math.abs(lastPoint.y - firstPoint.y)),
-      color: drawingColorRef.current,
-      strokeWidth: drawingStrokeWidthRef.current,
-      flipX: false,
-      flipY: false,
-    };
+    const recognizedObject = createRecognizedStrokeObject(points);
+    if (!recognizedObject) return;
 
     straightLineConvertedRef.current = true;
     activeDrawingPointsRef.current = [];
@@ -701,10 +1041,10 @@ export function NoteObjectLayer({
     clearLiveDrawingCanvas();
     clearStraightLineHoldTimer();
 
-    const nextObjects = [...objectsRef.current, newLine];
+    const nextObjects = [...objectsRef.current, recognizedObject];
     objectsRef.current = nextObjects;
     onChangeObjectsRef.current(nextObjects);
-    onSelectionChangeRef.current([newLine.id]);
+    onSelectionChangeRef.current([recognizedObject.id]);
   }
 
   function scheduleStraightLineHold(point: DrawingPoint) {
@@ -723,7 +1063,7 @@ export function NoteObjectLayer({
         Math.hypot(lastPoint.x - holdPoint.x, lastPoint.y - holdPoint.y) <= 3;
 
       if (hasStayedStill) {
-        convertActiveDrawingToLine();
+        convertActiveDrawingToRecognizedShape();
       }
     }, 560);
   }
@@ -890,6 +1230,20 @@ export function NoteObjectLayer({
 
     unlockDocumentScrollForEraserStroke();
   }, [drawingMode, drawingTool, unlockDocumentScrollForEraserStroke]);
+
+  useEffect(() => {
+    if (!selectionMode) return;
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement &&
+      activeElement.matches("[data-textbox-editor]")
+    ) {
+      activeElement.blur();
+    }
+
+    savedTextSelectionRef.current = null;
+  }, [selectionMode]);
 
   useEffect(() => {
     return () => {
@@ -2263,9 +2617,12 @@ export function NoteObjectLayer({
       let savedChanged = false;
       let pendingChanged = false;
       const nextObjects = workingObjects.flatMap((object) => {
-        if (object.type !== "drawing") return [object];
+        if (object.type !== "drawing" && object.type !== "line") return [object];
 
-        const result = eraseDrawingAtPoint(object, point, eraserRadius);
+        const result =
+          object.type === "line"
+            ? eraseLineAtPoint(object, point, eraserRadius)
+            : eraseDrawingAtPoint(object, point, eraserRadius);
         if (result.changed) savedChanged = true;
 
         return result.objects;
@@ -3140,7 +3497,11 @@ export function NoteObjectLayer({
       ))}
 
       {objects.map((object) => {
-        const selected = !drawingMode && selectedObjectIds.includes(object.id);
+        const canEditLineInDrawMode =
+          drawingMode && drawingTool === "draw" && object.type === "line";
+        const selected =
+          (!drawingMode || canEditLineInDrawMode) &&
+          selectedObjectIds.includes(object.id);
 
         if (object.type === "line") {
           const points = getLinePoints(object);
@@ -3150,7 +3511,9 @@ export function NoteObjectLayer({
             <div
               key={object.id}
               className="pointer-events-none absolute inset-0"
-              style={{ zIndex: selected ? 60 : undefined }}
+              style={{
+                zIndex: selected ? 60 : canEditLineInDrawMode ? 40 : undefined,
+              }}
             >
               <svg className="absolute inset-0 h-full w-full overflow-visible">
                 {selected && (
@@ -3183,7 +3546,10 @@ export function NoteObjectLayer({
                   strokeWidth={Math.max(20, lineStrokeWidth + 14)}
                   className="pointer-events-auto cursor-move"
                   style={{ touchAction: "none" }}
-                  onPointerDown={(event) => startDrag(event, object)}
+                  onPointerDown={(event) => {
+                    if (drawingMode && event.pointerType !== "touch") return;
+                    startDrag(event, object);
+                  }}
                 />
               </svg>
 
@@ -3241,6 +3607,20 @@ export function NoteObjectLayer({
                           onChange={(event) =>
                             updateObject(object.id, {
                               strokeWidth: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className={isDark ? "mt-2 block text-slate-100" : "mt-2 block text-gray-700"}>
+                        Color
+                        <input
+                          type="color"
+                          value={object.color ?? "#111827"}
+                          className="mt-2 h-8 w-full rounded border"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            updateObject(object.id, {
+                              color: event.target.value,
                             })
                           }
                         />
@@ -3441,30 +3821,55 @@ export function NoteObjectLayer({
                 <div
                   data-textbox-editor={object.id}
                   ref={(editor) => initializeTextBoxEditor(editor, object)}
-                  contentEditable
+                  contentEditable={!selectionMode}
                   suppressContentEditableWarning
+                  tabIndex={selectionMode ? -1 : 0}
                   className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...']"
                   style={{
                     color: object.color ?? (isDark ? "#f8fafc" : "#111827"),
                     fontSize: `${object.fontSize ?? 16}px`,
                     fontFamily: object.fontFamily ?? "Arial",
                     lineHeight: "normal",
+                    WebkitUserSelect: selectionMode ? "none" : undefined,
+                    userSelect: selectionMode ? "none" : undefined,
+                    WebkitTouchCallout: selectionMode ? "none" : undefined,
                   }}
                   onPointerDown={(event) => {
+                    if (selectionMode) {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
                     event.stopPropagation();
                     onSelectionChange([object.id]);
                   }}
-                  onMouseUp={(event) => saveTextSelection(event.currentTarget)}
-                  onKeyUp={(event) => saveTextSelection(event.currentTarget)}
-                  onInput={(event) =>
-                    {
-                      event.currentTarget.dataset.lastObjectHtml =
-                        event.currentTarget.innerHTML;
-                      updateTextBoxContent(object.id, event.currentTarget);
+                  onFocus={(event) => {
+                    if (selectionMode) event.currentTarget.blur();
+                  }}
+                  onMouseUp={(event) => {
+                    if (!selectionMode) saveTextSelection(event.currentTarget);
+                  }}
+                  onKeyUp={(event) => {
+                    if (!selectionMode) saveTextSelection(event.currentTarget);
+                  }}
+                  onBeforeInput={(event) => {
+                    if (selectionMode) event.preventDefault();
+                  }}
+                  onInput={(event) => {
+                    if (selectionMode) {
+                      event.preventDefault();
+                      event.currentTarget.innerHTML =
+                        event.currentTarget.dataset.lastObjectHtml ?? "";
+                      return;
                     }
-                  }
+
+                    event.currentTarget.dataset.lastObjectHtml =
+                      event.currentTarget.innerHTML;
+                    updateTextBoxContent(object.id, event.currentTarget);
+                  }}
                   onPaste={(event) => {
                     event.preventDefault();
+                    if (selectionMode) return;
+
                     const text = event.clipboardData.getData("text/plain");
                     document.execCommand("insertText", false, text);
                     event.currentTarget.dataset.lastObjectHtml =
