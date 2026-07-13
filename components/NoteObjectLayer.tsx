@@ -750,11 +750,21 @@ export function NoteObjectLayer({
     const radiusY = touch.radiusY ?? 0;
     const force = touch.force ?? 0;
 
-    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 3 && radiusY <= 3;
+    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 8 && radiusY <= 8;
+  }
+
+  function isStylusPointer(event: PointerEvent | React.PointerEvent) {
+    if (event.pointerType !== "touch") return false;
+
+    const width = event.width ?? 0;
+    const height = event.height ?? 0;
+    const pressure = event.pressure ?? 0;
+
+    return pressure > 0 && width > 0 && height > 0 && width <= 8 && height <= 8;
   }
 
   function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType !== "touch";
+    return event.pointerType !== "touch" || isStylusPointer(event);
   }
 
   const lockDocumentScrollForEraserStroke = useCallback(() => {
@@ -1398,7 +1408,11 @@ export function NoteObjectLayer({
   }
 
   function isDrawingPointer(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType === "pen" || event.pointerType === "mouse";
+    return (
+      event.pointerType === "pen" ||
+      event.pointerType === "mouse" ||
+      isStylusPointer(event)
+    );
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
