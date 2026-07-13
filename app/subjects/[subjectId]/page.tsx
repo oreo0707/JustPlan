@@ -477,7 +477,6 @@ function handleSaveSubjectName() {
                         : "Import editable note"}
                       <input
                         type="file"
-                        accept=".justplan-note,application/json"
                         className="hidden"
                         disabled={isImportingEditableNote}
                         onChange={async (event) => {
