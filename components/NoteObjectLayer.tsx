@@ -743,28 +743,11 @@ export function NoteObjectLayer({
   }
 
   function isStylusTouch(touch: Touch) {
-    const typedTouch = touch as Touch & { touchType?: string };
-    if (typedTouch.touchType === "stylus") return true;
-
-    const radiusX = touch.radiusX ?? 0;
-    const radiusY = touch.radiusY ?? 0;
-    const force = touch.force ?? 0;
-
-    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 8 && radiusY <= 8;
-  }
-
-  function isStylusPointer(event: PointerEvent | React.PointerEvent) {
-    if (event.pointerType !== "touch") return false;
-
-    const width = event.width ?? 0;
-    const height = event.height ?? 0;
-    const pressure = event.pressure ?? 0;
-
-    return pressure > 0 && width > 0 && height > 0 && width <= 8 && height <= 8;
+    return (touch as Touch & { touchType?: string }).touchType === "stylus";
   }
 
   function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType !== "touch" || isStylusPointer(event);
+    return event.pointerType !== "touch";
   }
 
   const lockDocumentScrollForEraserStroke = useCallback(() => {
@@ -1408,11 +1391,7 @@ export function NoteObjectLayer({
   }
 
   function isDrawingPointer(event: PointerEvent | React.PointerEvent) {
-    return (
-      event.pointerType === "pen" ||
-      event.pointerType === "mouse" ||
-      isStylusPointer(event)
-    );
+    return event.pointerType === "pen" || event.pointerType === "mouse";
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
@@ -1597,6 +1576,7 @@ export function NoteObjectLayer({
 
       event.preventDefault();
       event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 500;
       canvasDrawingPointerIdRef.current = event.pointerId;
       beginCanvasStroke(
         event.pointerId,
@@ -1662,6 +1642,7 @@ export function NoteObjectLayer({
 
       event.preventDefault();
       event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
       canvasDrawingTouchIdRef.current = touch.identifier;
       beginCanvasStroke(
         -touch.identifier - 1,
@@ -3438,6 +3419,7 @@ export function NoteObjectLayer({
 
       event.preventDefault();
       event.stopPropagation();
+      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
 
       if (drawingToolRef.current === "erase") {
         const point = getLayerTouchPoint(touch);
@@ -4099,7 +4081,6 @@ export function NoteObjectLayer({
                       (event.pointerType === "mouse" ||
                         event.pointerType === "pen")
                     ) {
-                      startDrawing(event.nativeEvent);
                       return;
                     }
 
@@ -4445,7 +4426,6 @@ export function NoteObjectLayer({
                 canFingerUseRecognizedShape &&
                 (event.pointerType === "mouse" || event.pointerType === "pen")
               ) {
-                startDrawing(event.nativeEvent);
                 return;
               }
 
