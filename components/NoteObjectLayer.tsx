@@ -389,6 +389,10 @@ function canDuplicateObject(object: NoteObject) {
   );
 }
 
+function canEditObjectInDrawMode(object: NoteObject) {
+  return object.type !== "drawing";
+}
+
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
   if (object.vertices?.length) return object.vertices;
 
@@ -3269,10 +3273,13 @@ export function NoteObjectLayer({
 
     event.preventDefault();
     event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
 
+    const selectionElement = event.currentTarget;
+    const pointerId = event.pointerId;
     const layerLeft = layerBounds.left;
     const layerTop = layerBounds.top;
     const startX = clampValue(event.clientX - layerLeft, 0, pageWidth);
@@ -3286,7 +3293,10 @@ export function NoteObjectLayer({
       setSelectionPath(pathPoints);
 
       function handleLassoMove(moveEvent: PointerEvent) {
+        if (moveEvent.pointerId !== pointerId) return;
+
         moveEvent.preventDefault();
+        moveEvent.stopPropagation();
 
         const nextPoint = {
           x: clampValue(moveEvent.clientX - layerLeft, 0, pageWidth),
@@ -3313,18 +3323,27 @@ export function NoteObjectLayer({
       }
 
       function handleLassoUp() {
+        if (selectionElement.hasPointerCapture?.(pointerId)) {
+          selectionElement.releasePointerCapture?.(pointerId);
+        }
+
         setSelectionPath([]);
         window.removeEventListener("pointermove", handleLassoMove);
         window.removeEventListener("pointerup", handleLassoUp);
+        window.removeEventListener("pointercancel", handleLassoUp);
       }
 
-      window.addEventListener("pointermove", handleLassoMove);
+      window.addEventListener("pointermove", handleLassoMove, { passive: false });
       window.addEventListener("pointerup", handleLassoUp);
+      window.addEventListener("pointercancel", handleLassoUp);
       return;
     }
 
     function handleMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+
       moveEvent.preventDefault();
+      moveEvent.stopPropagation();
 
       const currentX = clampValue(moveEvent.clientX - layerLeft, 0, pageWidth);
       const currentY = clampValue(
@@ -3348,13 +3367,19 @@ export function NoteObjectLayer({
     }
 
     function handleUp() {
+      if (selectionElement.hasPointerCapture?.(pointerId)) {
+        selectionElement.releasePointerCapture?.(pointerId);
+      }
+
       setSelectionBox(null);
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
     }
 
-    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
   }
 
   const hasSingleSelection = selectedObjectIds.length === 1;
@@ -3385,11 +3410,11 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: shouldLockEraserScroll ? "none" : "pan-y",
+        touchAction: shouldLockEraserScroll || selectionMode ? "none" : "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior: shouldLockEraserScroll ? "none" : "auto",
+        overscrollBehavior: shouldLockEraserScroll || selectionMode ? "none" : "auto",
       }}
       onPointerDown={(event) => {
         if (isPasteMode && !drawingMode && !selectionMode) {
@@ -3497,10 +3522,10 @@ export function NoteObjectLayer({
       ))}
 
       {objects.map((object) => {
-        const canEditLineInDrawMode =
-          drawingMode && drawingTool === "draw" && object.type === "line";
+        const canEditInDrawMode =
+          drawingMode && drawingTool === "draw" && canEditObjectInDrawMode(object);
         const selected =
-          (!drawingMode || canEditLineInDrawMode) &&
+          (!drawingMode || canEditInDrawMode) &&
           selectedObjectIds.includes(object.id);
 
         if (object.type === "line") {
@@ -3512,7 +3537,7 @@ export function NoteObjectLayer({
               key={object.id}
               className="pointer-events-none absolute inset-0"
               style={{
-                zIndex: selected ? 60 : canEditLineInDrawMode ? 40 : undefined,
+                zIndex: selected ? 80 : canEditInDrawMode ? 40 : undefined,
               }}
             >
               <svg className="absolute inset-0 h-full w-full overflow-visible">
@@ -3547,7 +3572,7 @@ export function NoteObjectLayer({
                   className="pointer-events-auto cursor-move"
                   style={{ touchAction: "none" }}
                   onPointerDown={(event) => {
-                    if (drawingMode && event.pointerType !== "touch") return;
+                    if (drawingMode && event.pointerType === "mouse") return;
                     startDrag(event, object);
                   }}
                 />
@@ -3657,7 +3682,7 @@ export function NoteObjectLayer({
           );
         }
 
-        const ignoreDuringDrawing = drawingMode && object.type !== "textbox";
+        const isEditableDuringDrawing = drawingMode && canEditInDrawMode;
         const shapeVertices = isVertexShape(object)
           ? getShapeVertices(object)
           : [];
@@ -3666,7 +3691,7 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              ignoreDuringDrawing
+              drawingMode && !isEditableDuringDrawing
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3679,7 +3704,7 @@ export function NoteObjectLayer({
               top: object.y,
               width: object.width,
               height: object.height,
-              zIndex: selected ? 60 : undefined,
+              zIndex: selected ? 80 : drawingMode && canEditInDrawMode ? 40 : undefined,
               touchAction: object.type === "textbox" ? "auto" : "none",
               WebkitUserSelect: object.type === "textbox" ? undefined : "none",
               userSelect: object.type === "textbox" ? undefined : "none",
@@ -3689,6 +3714,8 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
+              if (drawingMode && event.pointerType === "mouse") return;
+
               if (object.type === "textbox") {
                 event.stopPropagation();
                 onSelectionChange([object.id]);
