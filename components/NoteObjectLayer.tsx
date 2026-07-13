@@ -1669,6 +1669,18 @@ export function NoteObjectLayer({
     );
   }
 
+  function updateSelectedDrawingObjects(updates: Partial<NoteObject>) {
+    const selectedIds = new Set(selectedObjectIds);
+
+    onChangeObjects(
+      objects.map((object) =>
+        selectedIds.has(object.id) && object.type === "drawing"
+          ? { ...object, ...updates }
+          : object
+      )
+    );
+  }
+
   function escapeHtml(value: string) {
     return value
       .replaceAll("&", "&amp;")
@@ -3443,6 +3455,7 @@ export function NoteObjectLayer({
 
   function startSelectionBox(event: React.PointerEvent<HTMLDivElement>) {
     if (!selectionMode || drawingMode || event.target !== event.currentTarget) return;
+    if (event.pointerType === "touch") return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -3574,6 +3587,10 @@ export function NoteObjectLayer({
   const canDuplicateGroupSelection = objects.some(
     (object) =>
       selectedObjectIds.includes(object.id) && canDuplicateObject(object)
+  );
+  const selectedDrawingObjects = objects.filter(
+    (object) =>
+      selectedObjectIds.includes(object.id) && object.type === "drawing"
   );
 
   return (
@@ -3716,9 +3733,7 @@ export function NoteObjectLayer({
           selectionMode,
           drawingMode
         );
-        const selected =
-          canSelectObject &&
-          selectedObjectIds.includes(object.id);
+        const selected = selectedObjectIds.includes(object.id);
         const showObjectControls = selected && canShowSelectionControls;
 
         if (object.type === "line") {
@@ -3887,7 +3902,7 @@ export function NoteObjectLayer({
           <div
             key={object.id}
             className={`${
-              !canObjectReceivePointer
+              !canObjectReceivePointer && !showObjectControls
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
@@ -3910,7 +3925,13 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
-              if (!canObjectReceivePointer) return;
+              const canFingerMoveSelectedDrawing =
+                selectionMode &&
+                event.pointerType === "touch" &&
+                selected &&
+                object.type === "drawing";
+
+              if (!canObjectReceivePointer && !canFingerMoveSelectedDrawing) return;
 
               if (object.type === "textbox") {
                 event.stopPropagation();
@@ -4424,6 +4445,52 @@ export function NoteObjectLayer({
             }}
           >
             {renderMoveActionButton()}
+            {selectedDrawingObjects.length > 0 && (
+              <>
+                <label
+                  className={
+                    isDark
+                      ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
+                      : "flex flex-col gap-1 px-2 py-1 text-gray-700"
+                  }
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  Thickness
+                  <input
+                    type="range"
+                    min="1"
+                    max="36"
+                    value={selectedDrawingObjects[0].strokeWidth ?? 4}
+                    className="w-full"
+                    onChange={(event) =>
+                      updateSelectedDrawingObjects({
+                        strokeWidth: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label
+                  className={
+                    isDark
+                      ? "flex items-center justify-center gap-2 px-2 py-1 text-slate-100"
+                      : "flex items-center justify-center gap-2 px-2 py-1 text-gray-700"
+                  }
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  Color
+                  <input
+                    type="color"
+                    value={selectedDrawingObjects[0].color ?? "#111827"}
+                    className="h-8 w-10 rounded border"
+                    onChange={(event) =>
+                      updateSelectedDrawingObjects({
+                        color: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </>
+            )}
             {canDuplicateGroupSelection &&
               renderSelectionActionButton(
                 "Duplicate",
