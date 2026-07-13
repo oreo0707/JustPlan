@@ -3646,7 +3646,10 @@ export function NoteObjectLayer({
       )}
 
       {activeDrawingPoints.length > 0 && (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          style={{ zIndex: 76 }}
+        >
           <path
             d={getDrawingPath(activeDrawingPoints)}
             fill="none"
@@ -3662,7 +3665,7 @@ export function NoteObjectLayer({
         </svg>
       )}
 
-      {pendingDrawings.map((object) => (
+      {pendingDrawings.map((object, index) => (
         <div
           key={object.id}
           className="pointer-events-none absolute"
@@ -3671,6 +3674,7 @@ export function NoteObjectLayer({
             top: object.y,
             width: object.width,
             height: object.height,
+            zIndex: 60 + Math.min(index, 15),
           }}
         >
           <svg
@@ -3888,7 +3892,7 @@ export function NoteObjectLayer({
                 ? "pointer-events-none"
                 : "pointer-events-auto"
             } absolute cursor-move ${
-              selected
+              selected && !(hasDrawingOnlySelection && object.type === "drawing")
                 ? "ring-2 ring-blue-600 ring-offset-2 ring-offset-transparent"
                 : ""
             }`}
