@@ -737,15 +737,19 @@ export default function NoteEditorPage() {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
     const activeScrollContainer = scrollContainer;
-    let gestureStartedInsideNote = false;
+    let isPinchGestureActive = false;
+    let safariGestureState: {
+      zoom: number;
+      centerX: number;
+      centerY: number;
+      scrollLeft: number;
+      scrollTop: number;
+    } | null = null;
 
     function handleTouchStart(event: TouchEvent) {
-      gestureStartedInsideNote =
-        event.target instanceof Node &&
-        activeScrollContainer.contains(event.target);
-
-      if (!gestureStartedInsideNote || event.touches.length !== 2) {
+      if (event.touches.length < 2) {
         tabletGestureRef.current = null;
+        isPinchGestureActive = false;
         return;
       }
 
@@ -756,6 +760,7 @@ export default function NoteEditorPage() {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      isPinchGestureActive = true;
 
       const containerBounds = activeScrollContainer.getBoundingClientRect();
 
@@ -777,10 +782,10 @@ export default function NoteEditorPage() {
     }
 
     function handleTouchMove(event: TouchEvent) {
-      if (!gestureStartedInsideNote) return;
+      if (!isPinchGestureActive) return;
 
       const gesture = tabletGestureRef.current;
-      if (!gesture || event.touches.length !== 2) return;
+      if (!gesture || event.touches.length < 2) return;
 
       const nextDistance = getTouchDistance(event.touches);
       if (nextDistance <= 0) return;
@@ -821,7 +826,64 @@ export default function NoteEditorPage() {
       if (event.touches.length >= 2) return;
 
       tabletGestureRef.current = null;
-      gestureStartedInsideNote = false;
+      isPinchGestureActive = false;
+    }
+
+    function getContainerCenter() {
+      const containerBounds = activeScrollContainer.getBoundingClientRect();
+      return {
+        x: containerBounds.width / 2,
+        y: containerBounds.height / 2,
+      };
+    }
+
+    function handleSafariGestureStart(event: Event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const center = getContainerCenter();
+      safariGestureState = {
+        zoom: noteZoom,
+        centerX: center.x,
+        centerY: center.y,
+        scrollLeft: activeScrollContainer.scrollLeft,
+        scrollTop: activeScrollContainer.scrollTop,
+      };
+    }
+
+    function handleSafariGestureChange(event: Event) {
+      if (!safariGestureState) return;
+
+      const gestureEvent = event as Event & { scale?: number };
+      const scale = typeof gestureEvent.scale === "number" ? gestureEvent.scale : 1;
+      if (scale <= 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const nextZoom = clampZoom(safariGestureState.zoom * scale);
+      const zoomRatio = nextZoom / Math.max(0.01, safariGestureState.zoom);
+
+      setNoteZoom(nextZoom);
+
+      window.requestAnimationFrame(() => {
+        if (!safariGestureState) return;
+
+        activeScrollContainer.scrollLeft =
+          (safariGestureState.scrollLeft + safariGestureState.centerX) *
+            zoomRatio -
+          safariGestureState.centerX;
+        activeScrollContainer.scrollTop =
+          (safariGestureState.scrollTop + safariGestureState.centerY) *
+            zoomRatio -
+          safariGestureState.centerY;
+      });
+    }
+
+    function handleSafariGestureEnd() {
+      safariGestureState = null;
     }
 
     window.addEventListener("touchstart", handleTouchStart, {
@@ -838,9 +900,21 @@ export default function NoteEditorPage() {
     window.addEventListener("touchcancel", handleTouchEnd, {
       capture: true,
     });
+    window.addEventListener("gesturestart", handleSafariGestureStart, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("gesturechange", handleSafariGestureChange, {
+      passive: false,
+      capture: true,
+    });
+    window.addEventListener("gestureend", handleSafariGestureEnd, {
+      capture: true,
+    });
 
     return () => {
       tabletGestureRef.current = null;
+      safariGestureState = null;
 
       window.removeEventListener("touchstart", handleTouchStart, {
         capture: true,
@@ -852,6 +926,15 @@ export default function NoteEditorPage() {
         capture: true,
       });
       window.removeEventListener("touchcancel", handleTouchEnd, {
+        capture: true,
+      });
+      window.removeEventListener("gesturestart", handleSafariGestureStart, {
+        capture: true,
+      });
+      window.removeEventListener("gesturechange", handleSafariGestureChange, {
+        capture: true,
+      });
+      window.removeEventListener("gestureend", handleSafariGestureEnd, {
         capture: true,
       });
     };
