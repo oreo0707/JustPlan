@@ -1576,7 +1576,9 @@ export function NoteObjectLayer({
 
       event.preventDefault();
       event.stopPropagation();
-      suppressPointerDrawingUntilRef.current = Date.now() + 500;
+      if (event.pointerType !== "pen") {
+        suppressPointerDrawingUntilRef.current = Date.now() + 500;
+      }
       canvasDrawingPointerIdRef.current = event.pointerId;
       beginCanvasStroke(
         event.pointerId,
@@ -3268,7 +3270,12 @@ export function NoteObjectLayer({
   function startDrawing(event: PointerEvent) {
     if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
     if (!canUsePointerForDrawing(event)) return;
-    if (Date.now() < suppressPointerDrawingUntilRef.current) return;
+    if (
+      event.pointerType !== "pen" &&
+      Date.now() < suppressPointerDrawingUntilRef.current
+    ) {
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
