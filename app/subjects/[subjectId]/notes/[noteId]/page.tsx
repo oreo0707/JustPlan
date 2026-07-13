@@ -83,6 +83,9 @@ export default function NoteEditorPage() {
   const pendingDrawingCountRef = useRef(0);
   const skipNextObjectDirtyMarkRef = useRef(false);
   const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
+  const activeTouchPointersRef = useRef(
+    new Map<number, { x: number; y: number }>()
+  );
   const tabletGestureRef = useRef<{
     touchCount: number;
     distance: number;
@@ -687,32 +690,6 @@ export default function NoteEditorPage() {
     return Math.min(2.2, Math.max(0.6, value));
   }
 
-  function getTouchDistance(touches: TouchList) {
-    const firstTouch = touches[0];
-    const secondTouch = touches[1];
-
-    if (!firstTouch || !secondTouch) return 0;
-
-    return Math.hypot(
-      secondTouch.clientX - firstTouch.clientX,
-      secondTouch.clientY - firstTouch.clientY
-    );
-  }
-
-  function getTouchCenter(touches: TouchList) {
-    const firstTouch = touches[0];
-    const secondTouch = touches[1];
-
-    if (!firstTouch || !secondTouch) {
-      return { x: 0, y: 0 };
-    }
-
-    return {
-      x: (firstTouch.clientX + secondTouch.clientX) / 2,
-      y: (firstTouch.clientY + secondTouch.clientY) / 2,
-    };
-  }
-
   function handleUndoButton() {
     if (pendingDrawingCountRef.current > 0) {
       setDrawingUndoRequestId((current) => current + 1);
@@ -737,39 +714,40 @@ export default function NoteEditorPage() {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
     const activeScrollContainer = scrollContainer;
-    let gestureStartedInsideNote = false;
+    const activeTouchPointers = activeTouchPointersRef.current;
 
-    function handleTouchStart(event: TouchEvent) {
-      gestureStartedInsideNote =
-        event.target instanceof Node &&
-        activeScrollContainer.contains(event.target);
+    function getPointerPair() {
+      const pointers = Array.from(activeTouchPointers.values());
+      const firstPointer = pointers[0];
+      const secondPointer = pointers[1];
+      if (!firstPointer || !secondPointer) return null;
 
-      if (!gestureStartedInsideNote) {
-        tabletGestureRef.current = null;
-        return;
-      }
+      const distance = Math.hypot(
+        secondPointer.x - firstPointer.x,
+        secondPointer.y - firstPointer.y
+      );
+      const center = {
+        x: (firstPointer.x + secondPointer.x) / 2,
+        y: (firstPointer.y + secondPointer.y) / 2,
+      };
 
-      if (event.touches.length !== 2) {
-        tabletGestureRef.current = null;
-        return;
-      }
+      return { distance, center };
+    }
 
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+    function startPointerPinch() {
+      const pointerPair = getPointerPair();
+      if (!pointerPair || pointerPair.distance <= 0) return;
 
-      const distance = getTouchDistance(event.touches);
-      const center = getTouchCenter(event.touches);
       const containerBounds = activeScrollContainer.getBoundingClientRect();
 
       tabletGestureRef.current = {
-        touchCount: event.touches.length,
-        distance,
+        touchCount: 2,
+        distance: pointerPair.distance,
         zoom: noteZoom,
-        centerX: center.x - containerBounds.left,
-        centerY: center.y - containerBounds.top,
-        startX: center.x,
-        startY: center.y,
+        centerX: pointerPair.center.x - containerBounds.left,
+        centerY: pointerPair.center.y - containerBounds.top,
+        startX: pointerPair.center.x,
+        startY: pointerPair.center.y,
         startTime: Date.now(),
         maxMove: 0,
         maxDistanceChange: 0,
@@ -779,27 +757,63 @@ export default function NoteEditorPage() {
       };
     }
 
-    function handleTouchMove(event: TouchEvent) {
-      if (!gestureStartedInsideNote) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (event.pointerType !== "touch") return;
+      if (
+        !(event.target instanceof Node) ||
+        !activeScrollContainer.contains(event.target)
+      ) {
+        return;
+      }
+
+      activeTouchPointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      if (activeTouchPointers.size === 2) {
+        event.preventDefault();
+        startPointerPinch();
+      }
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      if (
+        event.pointerType !== "touch" ||
+        !activeTouchPointers.has(event.pointerId)
+      ) {
+        return;
+      }
+
+      activeTouchPointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      if (activeTouchPointers.size < 2) return;
 
       const gesture = tabletGestureRef.current;
-      if (!gesture || event.touches.length !== gesture.touchCount) return;
+      if (!gesture) {
+        startPointerPinch();
+        return;
+      }
+
+      const pointerPair = getPointerPair();
+      if (!pointerPair || pointerPair.distance <= 0) return;
 
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
 
-      const center = getTouchCenter(event.touches);
       gesture.maxMove = Math.max(
         gesture.maxMove,
-        Math.hypot(center.x - gesture.startX, center.y - gesture.startY)
+        Math.hypot(
+          pointerPair.center.x - gesture.startX,
+          pointerPair.center.y - gesture.startY
+        )
       );
 
-      if (gesture.touchCount !== 2) return;
-
-      const nextDistance = getTouchDistance(event.touches);
-      if (nextDistance <= 0) return;
-      const distanceChange = Math.abs(nextDistance - gesture.distance);
+      const distanceChange = Math.abs(pointerPair.distance - gesture.distance);
       gesture.maxDistanceChange = Math.max(
         gesture.maxDistanceChange,
         distanceChange
@@ -809,7 +823,7 @@ export default function NoteEditorPage() {
       gesture.isPinching = true;
 
       const nextZoom = clampZoom(
-        gesture.zoom * (nextDistance / gesture.distance)
+        gesture.zoom * (pointerPair.distance / gesture.distance)
       );
       const zoomRatio = nextZoom / Math.max(0.01, gesture.zoom);
 
@@ -823,46 +837,45 @@ export default function NoteEditorPage() {
       });
     }
 
-    function handleTouchEnd(event: TouchEvent) {
-      if (!gestureStartedInsideNote) return;
-
-      const gesture = tabletGestureRef.current;
-      if (!gesture || event.touches.length > 0) {
-        if (event.touches.length === 0) gestureStartedInsideNote = false;
-        return;
+    function handlePointerEnd(event: PointerEvent) {
+      if (event.pointerType !== "touch") return;
+      activeTouchPointers.delete(event.pointerId);
+      if (activeTouchPointers.size < 2) {
+        tabletGestureRef.current = null;
+      } else {
+        startPointerPinch();
       }
-
-      tabletGestureRef.current = null;
-      gestureStartedInsideNote = false;
-
     }
 
-    window.addEventListener("touchstart", handleTouchStart, {
+    window.addEventListener("pointerdown", handlePointerDown, {
       passive: false,
       capture: true,
     });
-    window.addEventListener("touchmove", handleTouchMove, {
+    window.addEventListener("pointermove", handlePointerMove, {
       passive: false,
       capture: true,
     });
-    window.addEventListener("touchend", handleTouchEnd, {
+    window.addEventListener("pointerup", handlePointerEnd, {
       capture: true,
     });
-    window.addEventListener("touchcancel", handleTouchEnd, {
+    window.addEventListener("pointercancel", handlePointerEnd, {
       capture: true,
     });
 
     return () => {
-      window.removeEventListener("touchstart", handleTouchStart, {
+      activeTouchPointers.clear();
+      tabletGestureRef.current = null;
+
+      window.removeEventListener("pointerdown", handlePointerDown, {
         capture: true,
       });
-      window.removeEventListener("touchmove", handleTouchMove, {
+      window.removeEventListener("pointermove", handlePointerMove, {
         capture: true,
       });
-      window.removeEventListener("touchend", handleTouchEnd, {
+      window.removeEventListener("pointerup", handlePointerEnd, {
         capture: true,
       });
-      window.removeEventListener("touchcancel", handleTouchEnd, {
+      window.removeEventListener("pointercancel", handlePointerEnd, {
         capture: true,
       });
     };
