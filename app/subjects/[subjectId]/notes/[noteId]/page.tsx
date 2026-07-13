@@ -76,7 +76,7 @@ export default function NoteEditorPage() {
   const [isNoteSaved, setIsNoteSaved] = useState(false);
   const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
   const [drawingRedoRequestId, setDrawingRedoRequestId] = useState(0);
-  const noteZoom = 1;
+  const [noteZoom, setNoteZoom] = useState(1);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
@@ -673,6 +673,14 @@ export default function NoteEditorPage() {
 
   function handlePendingDrawingCountChange(count: number) {
     pendingDrawingCountRef.current = count;
+  }
+
+  function clampZoom(value: number) {
+    return Math.min(2.2, Math.max(0.6, value));
+  }
+
+  function handleChangeNoteZoom(nextZoom: number) {
+    setNoteZoom(clampZoom(nextZoom));
   }
 
   function getTouchCenter(touches: TouchList) {
@@ -1988,19 +1996,19 @@ function addTextBox() {
             <button
               type="button"
               className={
-                !isDrawingMode
+                noteMode === "draw" && !isDrawingMode
                   ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
                   : noteToolbarMenuItemClass
               }
               onClick={() => {
-                setNoteMode("text");
+                setNoteMode("draw");
                 setIsDrawingMode(false);
                 setIsObjectSelectionMode(false);
                 setSelectedObjectIds([]);
                 setShowDrawMenu(false);
               }}
             >
-              Text
+              Text / Pan
             </button>
 
             <button
@@ -2893,19 +2901,19 @@ function addTextBox() {
                     <button
                       type="button"
                       className={
-                        !isDrawingMode
+                        noteMode === "draw" && !isDrawingMode
                           ? "w-full rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
                           : "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
                       }
                       onClick={() => {
-                        setNoteMode("text");
+                        setNoteMode("draw");
                         setIsDrawingMode(false);
                         setIsObjectSelectionMode(false);
                         setSelectedObjectIds([]);
                         setShowDrawMenu(false);
                       }}
                     >
-                      Pan
+                      Text / Pan
                     </button>
 
                     <button
@@ -3212,6 +3220,46 @@ function addTextBox() {
           </div>
         </div>
       </section>
+
+      <div
+        className={
+          isDarkNoteTheme
+            ? "no-print fixed bottom-6 right-6 z-[10001] flex w-64 items-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-lg"
+            : "no-print fixed bottom-6 right-6 z-[10001] flex w-64 items-center gap-2 rounded-2xl border bg-white/95 p-3 shadow-lg"
+        }
+      >
+        <button
+          type="button"
+          className={noteTopButtonClass}
+          onClick={() => handleChangeNoteZoom(noteZoom - 0.1)}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <label className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+          <span className="whitespace-nowrap">{Math.round(noteZoom * 100)}%</span>
+          <input
+            type="range"
+            min="60"
+            max="220"
+            step="5"
+            value={Math.round(noteZoom * 100)}
+            className="min-w-0 flex-1"
+            aria-label="Note zoom"
+            onChange={(event) =>
+              handleChangeNoteZoom(Number(event.target.value) / 100)
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className={noteTopButtonClass}
+          onClick={() => handleChangeNoteZoom(noteZoom + 0.1)}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
     </main>
   );
 }
