@@ -97,6 +97,8 @@ export default function NoteEditorPage() {
     isPinching: boolean;
     scrollLeft: number;
     scrollTop: number;
+    panLastX?: number;
+    panLastY?: number;
   } | null>(null);
   const undoStackRef = useRef<
     Array<{
@@ -713,6 +715,21 @@ export default function NoteEditorPage() {
     };
   }
 
+  function isStylusTouch(touch: Touch) {
+    return (touch as Touch & { touchType?: string }).touchType === "stylus";
+  }
+
+  function isInteractiveTouchTarget(target: EventTarget | null) {
+    return (
+      target instanceof HTMLElement &&
+      Boolean(
+        target.closest(
+          "button, a, input, select, textarea, [contenteditable='true'], [role='button']"
+        )
+      )
+    );
+  }
+
   function runTabletUndoGesture() {
     if (pendingDrawingCountRef.current > 0) {
       setDrawingUndoRequestId((current) => current + 1);
@@ -749,12 +766,47 @@ export default function NoteEditorPage() {
         return;
       }
 
+      if (
+        isDrawingMode &&
+        event.touches.length === 1 &&
+        !isInteractiveTouchTarget(event.target)
+      ) {
+        const touch = event.touches[0];
+        if (!touch || isStylusTouch(touch)) {
+          tabletGestureRef.current = null;
+          return;
+        }
+
+        event.preventDefault();
+
+        tabletGestureRef.current = {
+          touchCount: 1,
+          distance: 0,
+          zoom: noteZoom,
+          centerX: touch.clientX,
+          centerY: touch.clientY,
+          startX: touch.clientX,
+          startY: touch.clientY,
+          startTime: Date.now(),
+          maxMove: 0,
+          maxDistanceChange: 0,
+          isPinching: false,
+          scrollLeft: activeScrollContainer.scrollLeft,
+          scrollTop: activeScrollContainer.scrollTop,
+          panLastX: touch.clientX,
+          panLastY: touch.clientY,
+        };
+        return;
+      }
+
       if (event.touches.length !== 2 && event.touches.length !== 3) {
         tabletGestureRef.current = null;
         return;
       }
 
       event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
 
       const distance = getTouchDistance(event.touches);
       const center = getTouchCenter(event.touches);
@@ -785,6 +837,32 @@ export default function NoteEditorPage() {
 
       event.preventDefault();
 
+      if (gesture.touchCount === 1) {
+        const touch = event.touches[0];
+        if (!touch || isStylusTouch(touch)) return;
+
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        const lastX = gesture.panLastX ?? touch.clientX;
+        const lastY = gesture.panLastY ?? touch.clientY;
+        const deltaX = touch.clientX - lastX;
+        const deltaY = touch.clientY - lastY;
+
+        activeScrollContainer.scrollLeft -= deltaX;
+        activeScrollContainer.scrollTop -= deltaY;
+        gesture.panLastX = touch.clientX;
+        gesture.panLastY = touch.clientY;
+        gesture.maxMove = Math.max(
+          gesture.maxMove,
+          Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY)
+        );
+        return;
+      }
+
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       const center = getTouchCenter(event.touches);
       gesture.maxMove = Math.max(
         gesture.maxMove,
@@ -803,10 +881,6 @@ export default function NoteEditorPage() {
 
       if (!gesture.isPinching && distanceChange < 10) return;
       gesture.isPinching = true;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
 
       const nextZoom = clampZoom(
         gesture.zoom * (nextDistance / gesture.distance)
@@ -836,6 +910,8 @@ export default function NoteEditorPage() {
       gestureStartedInsideNote = false;
 
       const duration = Date.now() - gesture.startTime;
+      if (gesture.touchCount === 1) return;
+
       const isTapGesture =
         duration <= 430 &&
         gesture.maxMove <= 28 &&
@@ -2480,7 +2556,7 @@ function addTextBox() {
     <main
       ref={scrollContainerRef}
       className={notePageClass}
-      style={{ touchAction: "pan-y" }}
+      style={{ touchAction: isDrawingMode ? "none" : "pan-y" }}
     >
       <Link
         href={`/subjects/${subjectId}`}
