@@ -555,7 +555,6 @@ export function NoteObjectLayer({
   const straightLineHoldTimerRef = useRef<number | null>(null);
   const straightLineHoldEligibleRef = useRef(false);
   const straightLineConvertedRef = useRef(false);
-  const activeStraightLineObjectIdRef = useRef<string | null>(null);
   const straightLineLastPointRef = useRef<DrawingPoint | null>(null);
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
@@ -1250,8 +1249,6 @@ export function NoteObjectLayer({
     if (!recognizedObject) return;
 
     straightLineConvertedRef.current = true;
-    activeStraightLineObjectIdRef.current =
-      recognizedObject.type === "line" ? recognizedObject.id : null;
     activeDrawingPointsRef.current = [];
     setActiveDrawingPoints([]);
     clearLiveDrawingCanvas();
@@ -1262,30 +1259,6 @@ export function NoteObjectLayer({
     onChangeObjectsRef.current(nextObjects);
     onSelectionChangeRef.current([recognizedObject.id]);
     setRecognizedShapeMenu(null);
-  }
-
-  function updateActiveStraightLineEndpoint(nextPoint: DrawingPoint) {
-    const activeLineId = activeStraightLineObjectIdRef.current;
-    if (!activeLineId || !isPointInsidePaper(nextPoint)) return;
-
-    const clampedPoint = {
-      x: clampValue(nextPoint.x, 0, pageWidth),
-      y: clampValue(nextPoint.y, 0, drawingHeight),
-    };
-    const nextObjects = objectsRef.current.map((object) => {
-      if (object.id !== activeLineId || object.type !== "line") return object;
-
-      return {
-        ...object,
-        endX: clampedPoint.x,
-        endY: clampedPoint.y,
-        width: Math.max(1, Math.abs(clampedPoint.x - object.x)),
-        height: Math.max(1, Math.abs(clampedPoint.y - object.y)),
-      };
-    });
-
-    objectsRef.current = nextObjects;
-    onChangeObjectsRef.current(nextObjects);
   }
 
   function scheduleStraightLineHold(point: DrawingPoint) {
@@ -1365,7 +1338,6 @@ export function NoteObjectLayer({
     if (straightLineConvertedRef.current) {
       straightLineConvertedRef.current = false;
       straightLineHoldEligibleRef.current = false;
-      activeStraightLineObjectIdRef.current = null;
       straightLineLastPointRef.current = null;
       clearLiveDrawingCanvas();
       return;
@@ -1421,10 +1393,7 @@ export function NoteObjectLayer({
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
-    if (straightLineConvertedRef.current) {
-      updateActiveStraightLineEndpoint(nextPoint);
-      return;
-    }
+    if (straightLineConvertedRef.current) return;
     if (!isPointInsidePaper(nextPoint)) return;
 
     const context = prepareLiveDrawingCanvas();
@@ -1558,7 +1527,6 @@ export function NoteObjectLayer({
       straightLineHoldEligibleRef.current =
         canStraighten && drawingToolRef.current === "draw";
       straightLineConvertedRef.current = false;
-      activeStraightLineObjectIdRef.current = null;
       straightLineLastPointRef.current = null;
       clearStraightLineHoldTimer();
       activeDrawingPointsRef.current = [];
@@ -3141,10 +3109,7 @@ export function NoteObjectLayer({
   }
 
   function addActiveDrawingPoint(nextPoint: DrawingPoint) {
-    if (straightLineConvertedRef.current) {
-      updateActiveStraightLineEndpoint(nextPoint);
-      return;
-    }
+    if (straightLineConvertedRef.current) return;
     if (!isPointInsidePaper(nextPoint)) return;
 
     const points = activeDrawingPointsRef.current;
@@ -3183,7 +3148,6 @@ export function NoteObjectLayer({
     if (straightLineConvertedRef.current) {
       straightLineConvertedRef.current = false;
       straightLineHoldEligibleRef.current = false;
-      activeStraightLineObjectIdRef.current = null;
       straightLineLastPointRef.current = null;
       return;
     }
@@ -3249,7 +3213,6 @@ export function NoteObjectLayer({
     straightLineHoldEligibleRef.current =
       canStraighten && drawingToolRef.current === "draw";
     straightLineConvertedRef.current = false;
-    activeStraightLineObjectIdRef.current = null;
     straightLineLastPointRef.current = null;
     clearStraightLineHoldTimer();
     activeDrawingPointsRef.current = [firstPoint];
