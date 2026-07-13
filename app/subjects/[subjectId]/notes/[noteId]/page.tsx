@@ -76,7 +76,7 @@ export default function NoteEditorPage() {
   const [isNoteSaved, setIsNoteSaved] = useState(false);
   const [drawingUndoRequestId, setDrawingUndoRequestId] = useState(0);
   const [drawingRedoRequestId, setDrawingRedoRequestId] = useState(0);
-  const [noteZoom, setNoteZoom] = useState(1);
+  const noteZoom = 1;
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stickerPickerRef = useRef<HTMLDivElement | null>(null);
@@ -85,18 +85,10 @@ export default function NoteEditorPage() {
   const drawingObjectRedoStackRef = useRef<NoteObject[]>([]);
   const tabletGestureRef = useRef<{
     touchCount: number;
-    distance: number;
-    zoom: number;
-    centerX: number;
-    centerY: number;
     startX: number;
     startY: number;
     startTime: number;
     maxMove: number;
-    maxDistanceChange: number;
-    isPinching: boolean;
-    scrollLeft: number;
-    scrollTop: number;
   } | null>(null);
   const undoStackRef = useRef<
     Array<{
@@ -683,22 +675,6 @@ export default function NoteEditorPage() {
     pendingDrawingCountRef.current = count;
   }
 
-  function clampZoom(value: number) {
-    return Math.min(2.2, Math.max(0.6, value));
-  }
-
-  function getTouchDistance(touches: TouchList) {
-    const firstTouch = touches[0];
-    const secondTouch = touches[1];
-
-    if (!firstTouch || !secondTouch) return 0;
-
-    return Math.hypot(
-      secondTouch.clientX - firstTouch.clientX,
-      secondTouch.clientY - firstTouch.clientY
-    );
-  }
-
   function getTouchCenter(touches: TouchList) {
     const firstTouch = touches[0];
     const secondTouch = touches[1];
@@ -713,7 +689,7 @@ export default function NoteEditorPage() {
     };
   }
 
-  function handleUndoButton() {
+  function runTabletUndoGesture() {
     if (pendingDrawingCountRef.current > 0) {
       setDrawingUndoRequestId((current) => current + 1);
       return;
@@ -726,7 +702,7 @@ export default function NoteEditorPage() {
     applyUndoSnapshot();
   }
 
-  function handleRedoButton() {
+  function runTabletRedoGesture() {
     setDrawingRedoRequestId((current) => current + 1);
     if (redoLatestSavedDrawingStroke()) {
       return;
@@ -734,156 +710,56 @@ export default function NoteEditorPage() {
   }
 
   useEffect(() => {
-    const scrollContainer = scrollContainerRef.current;
-    if (!scrollContainer) return;
-    const activeScrollContainer = scrollContainer;
-    let isPinchGestureActive = false;
-    let safariGestureState: {
-      zoom: number;
-      centerX: number;
-      centerY: number;
-      scrollLeft: number;
-      scrollTop: number;
-    } | null = null;
-
     function handleTouchStart(event: TouchEvent) {
-      if (event.touches.length < 2) {
+      if (event.touches.length !== 2 && event.touches.length !== 3) {
         tabletGestureRef.current = null;
-        isPinchGestureActive = false;
         return;
       }
 
-      const distance = getTouchDistance(event.touches);
       const center = getTouchCenter(event.touches);
-      if (distance <= 0) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      isPinchGestureActive = true;
-
-      const containerBounds = activeScrollContainer.getBoundingClientRect();
 
       tabletGestureRef.current = {
-        touchCount: 2,
-        distance,
-        zoom: noteZoom,
-        centerX: center.x - containerBounds.left,
-        centerY: center.y - containerBounds.top,
+        touchCount: event.touches.length,
         startX: center.x,
         startY: center.y,
         startTime: Date.now(),
         maxMove: 0,
-        maxDistanceChange: 0,
-        isPinching: false,
-        scrollLeft: activeScrollContainer.scrollLeft,
-        scrollTop: activeScrollContainer.scrollTop,
       };
     }
 
     function handleTouchMove(event: TouchEvent) {
-      if (!isPinchGestureActive) return;
-
       const gesture = tabletGestureRef.current;
-      if (!gesture || event.touches.length < 2) return;
-
-      const nextDistance = getTouchDistance(event.touches);
-      if (nextDistance <= 0) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+      if (!gesture || event.touches.length !== gesture.touchCount) return;
 
       const center = getTouchCenter(event.touches);
       gesture.maxMove = Math.max(
         gesture.maxMove,
         Math.hypot(center.x - gesture.startX, center.y - gesture.startY)
       );
-
-      const distanceChange = Math.abs(nextDistance - gesture.distance);
-      gesture.maxDistanceChange = Math.max(
-        gesture.maxDistanceChange,
-        distanceChange
-      );
-
-      if (!gesture.isPinching && distanceChange < 6) return;
-      gesture.isPinching = true;
-
-      const nextZoom = clampZoom(gesture.zoom * (nextDistance / gesture.distance));
-      const zoomRatio = nextZoom / Math.max(0.01, gesture.zoom);
-
-      setNoteZoom(nextZoom);
-
-      window.requestAnimationFrame(() => {
-        activeScrollContainer.scrollLeft =
-          (gesture.scrollLeft + gesture.centerX) * zoomRatio - gesture.centerX;
-        activeScrollContainer.scrollTop =
-          (gesture.scrollTop + gesture.centerY) * zoomRatio - gesture.centerY;
-      });
     }
 
     function handleTouchEnd(event: TouchEvent) {
-      if (event.touches.length >= 2) return;
+      if (event.touches.length > 0) return;
 
+      const gesture = tabletGestureRef.current;
       tabletGestureRef.current = null;
-      isPinchGestureActive = false;
-    }
+      if (!gesture) return;
 
-    function getContainerCenter() {
-      const containerBounds = activeScrollContainer.getBoundingClientRect();
-      return {
-        x: containerBounds.width / 2,
-        y: containerBounds.height / 2,
-      };
-    }
+      const duration = Date.now() - gesture.startTime;
+      const isTapGesture = duration <= 430 && gesture.maxMove <= 28;
 
-    function handleSafariGestureStart(event: Event) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-
-      const center = getContainerCenter();
-      safariGestureState = {
-        zoom: noteZoom,
-        centerX: center.x,
-        centerY: center.y,
-        scrollLeft: activeScrollContainer.scrollLeft,
-        scrollTop: activeScrollContainer.scrollTop,
-      };
-    }
-
-    function handleSafariGestureChange(event: Event) {
-      if (!safariGestureState) return;
-
-      const gestureEvent = event as Event & { scale?: number };
-      const scale = typeof gestureEvent.scale === "number" ? gestureEvent.scale : 1;
-      if (scale <= 0) return;
+      if (!isTapGesture) return;
 
       event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
 
-      const nextZoom = clampZoom(safariGestureState.zoom * scale);
-      const zoomRatio = nextZoom / Math.max(0.01, safariGestureState.zoom);
+      if (gesture.touchCount === 2) {
+        runTabletUndoGesture();
+        return;
+      }
 
-      setNoteZoom(nextZoom);
-
-      window.requestAnimationFrame(() => {
-        if (!safariGestureState) return;
-
-        activeScrollContainer.scrollLeft =
-          (safariGestureState.scrollLeft + safariGestureState.centerX) *
-            zoomRatio -
-          safariGestureState.centerX;
-        activeScrollContainer.scrollTop =
-          (safariGestureState.scrollTop + safariGestureState.centerY) *
-            zoomRatio -
-          safariGestureState.centerY;
-      });
-    }
-
-    function handleSafariGestureEnd() {
-      safariGestureState = null;
+      if (gesture.touchCount === 3) {
+        runTabletRedoGesture();
+      }
     }
 
     window.addEventListener("touchstart", handleTouchStart, {
@@ -900,21 +776,9 @@ export default function NoteEditorPage() {
     window.addEventListener("touchcancel", handleTouchEnd, {
       capture: true,
     });
-    window.addEventListener("gesturestart", handleSafariGestureStart, {
-      passive: false,
-      capture: true,
-    });
-    window.addEventListener("gesturechange", handleSafariGestureChange, {
-      passive: false,
-      capture: true,
-    });
-    window.addEventListener("gestureend", handleSafariGestureEnd, {
-      capture: true,
-    });
 
     return () => {
       tabletGestureRef.current = null;
-      safariGestureState = null;
 
       window.removeEventListener("touchstart", handleTouchStart, {
         capture: true,
@@ -928,17 +792,8 @@ export default function NoteEditorPage() {
       window.removeEventListener("touchcancel", handleTouchEnd, {
         capture: true,
       });
-      window.removeEventListener("gesturestart", handleSafariGestureStart, {
-        capture: true,
-      });
-      window.removeEventListener("gesturechange", handleSafariGestureChange, {
-        capture: true,
-      });
-      window.removeEventListener("gestureend", handleSafariGestureEnd, {
-        capture: true,
-      });
     };
-  }, [noteZoom]);
+  });
 
   function handleChangeContent(nextContent: string) {
     setContent(nextContent);
@@ -2541,25 +2396,6 @@ function addTextBox() {
       >
         ←
       </Link>
-
-      <div className="no-print fixed left-16 top-24 z-[10001] flex items-center gap-2">
-        <button
-          type="button"
-          className={noteTopButtonClass}
-          onClick={handleUndoButton}
-          title="Undo"
-        >
-          Undo
-        </button>
-        <button
-          type="button"
-          className={noteTopButtonClass}
-          onClick={handleRedoButton}
-          title="Redo"
-        >
-          Redo
-        </button>
-      </div>
 
       <header className={noteHeaderClass}>
         <h1 className={isDarkNoteTheme ? "text-xl font-bold text-slate-100" : "text-xl font-bold text-gray-950"}>
