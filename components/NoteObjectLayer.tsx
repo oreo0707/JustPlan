@@ -2542,6 +2542,112 @@ export function NoteObjectLayer({
     window.addEventListener("pointerup", handleUp);
   }
 
+  function startRecognizedShapeResize(
+    event: React.PointerEvent<HTMLDivElement>,
+    object: NoteObject
+  ) {
+    const originalBounds = getObjectBounds(object);
+    if (originalBounds.width <= 0 || originalBounds.height <= 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange([object.id]);
+
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    const originalVertices = isVertexShape(object)
+      ? getShapeVertices(object)
+      : null;
+    const originalLinePoints =
+      object.type === "line" ? getLinePoints(object) : null;
+
+    function getScaledValue(value: number, origin: number, scale: number) {
+      return origin + (value - origin) * scale;
+    }
+
+    function handleMove(moveEvent: PointerEvent) {
+      moveEvent.preventDefault();
+
+      const { dx, dy } = getLayerDelta(
+        moveEvent.clientX - pointerX,
+        moveEvent.clientY - pointerY
+      );
+      const scale = Math.max(
+        0.2,
+        1 +
+          Math.max(
+            dx / Math.max(1, originalBounds.width),
+            dy / Math.max(1, originalBounds.height)
+          )
+      );
+
+      if (originalLinePoints) {
+        const startX = getScaledValue(
+          originalLinePoints.startX,
+          originalBounds.left,
+          scale
+        );
+        const startY = getScaledValue(
+          originalLinePoints.startY,
+          originalBounds.top,
+          scale
+        );
+        const endX = getScaledValue(
+          originalLinePoints.endX,
+          originalBounds.left,
+          scale
+        );
+        const endY = getScaledValue(
+          originalLinePoints.endY,
+          originalBounds.top,
+          scale
+        );
+
+        updateObject(object.id, {
+          x: clampValue(startX, 0, pageWidth),
+          y: clampValue(startY, 0, drawingHeight),
+          endX: clampValue(endX, 0, pageWidth),
+          endY: clampValue(endY, 0, drawingHeight),
+          width: Math.max(1, Math.abs(endX - startX)),
+          height: Math.max(1, Math.abs(endY - startY)),
+        });
+        return;
+      }
+
+      const nextWidth = Math.min(
+        Math.max(30, object.width * scale),
+        Math.max(1, pageWidth - object.x)
+      );
+      const nextHeight = Math.min(
+        Math.max(30, object.height * scale),
+        Math.max(1, drawingHeight - object.y)
+      );
+
+      updateObject(object.id, {
+        width: nextWidth,
+        height: nextHeight,
+        ...(originalVertices
+          ? {
+              vertices: originalVertices.map((vertex) => ({
+                x: (vertex.x / Math.max(1, object.width)) * nextWidth,
+                y: (vertex.y / Math.max(1, object.height)) * nextHeight,
+              })),
+            }
+          : {}),
+      });
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+  }
+
   function startGroupResize(event: React.PointerEvent<HTMLDivElement>) {
     if (!selectedGroupBounds) return;
 
@@ -3963,6 +4069,16 @@ export function NoteObjectLayer({
 
                     if (
                       canFingerUseRecognizedShape &&
+                      event.pointerType === "touch" &&
+                      selected
+                    ) {
+                      setRecognizedShapeMenu(null);
+                      startDrag(event, object);
+                      return;
+                    }
+
+                    if (
+                      canFingerUseRecognizedShape &&
                       (event.pointerType === "touch" ||
                         event.pointerType === "pen")
                     ) {
@@ -4143,6 +4259,16 @@ export function NoteObjectLayer({
                   (event.pointerType === "touch" || event.pointerType === "pen")
                 )
               ) {
+                return;
+              }
+
+              if (
+                canFingerUseRecognizedShape &&
+                event.pointerType === "touch" &&
+                selected
+              ) {
+                setRecognizedShapeMenu(null);
+                startDrag(event, object);
                 return;
               }
 
@@ -4665,6 +4791,30 @@ export function NoteObjectLayer({
               zIndex: 79,
             }}
           />
+          <div
+            className={`pointer-events-auto absolute flex h-6 w-6 touch-none cursor-nwse-resize items-center justify-center rounded-full border-2 border-blue-600 text-xs shadow-sm ${
+              isDark
+                ? "bg-slate-900 text-slate-100"
+                : "bg-white text-gray-800"
+            }`}
+            title="Resize formed shape"
+            style={{
+              left:
+                selectedRecognizedShapeBounds.left +
+                selectedRecognizedShapeBounds.width -
+                10,
+              top:
+                selectedRecognizedShapeBounds.top +
+                selectedRecognizedShapeBounds.height -
+                10,
+              zIndex: 84,
+            }}
+            onPointerDown={(event) =>
+              startRecognizedShapeResize(event, selectedRecognizedShape)
+            }
+          >
+            ↘
+          </div>
           <button
             type="button"
             className={`pointer-events-auto absolute flex h-8 w-8 touch-none items-center justify-center rounded-full border-2 border-blue-600 text-sm shadow-sm ${
