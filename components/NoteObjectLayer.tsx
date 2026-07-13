@@ -1212,6 +1212,7 @@ export function NoteObjectLayer({
     }
 
     if (finalPoints.length < 2) {
+      onSelectionChangeRef.current([]);
       clearLiveDrawingCanvas();
       return;
     }
@@ -1412,6 +1413,9 @@ export function NoteObjectLayer({
     function handlePointerDown(event: PointerEvent) {
 
       if (!isDrawingPointer(event)) {
+        if (event.pointerType === "touch") {
+          onSelectionChangeRef.current([]);
+        }
         return;
       }
 
@@ -2789,6 +2793,7 @@ export function NoteObjectLayer({
 
     event.preventDefault();
     event.stopPropagation();
+    onSelectionChangeRef.current([]);
     event.currentTarget.setPointerCapture(event.pointerId);
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
@@ -3094,7 +3099,15 @@ export function NoteObjectLayer({
 
       const touch = event.changedTouches[0];
       if (!touch) return;
-      if (!isStylusTouch(touch)) return;
+      if (!isStylusTouch(touch)) {
+        if (
+          event.touches.length === 1 &&
+          (event.target === drawingLayer || event.target === layerRef.current)
+        ) {
+          onSelectionChangeRef.current([]);
+        }
+        return;
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -3484,6 +3497,7 @@ export function NoteObjectLayer({
   const shouldLockEraserScroll =
     isEraserScrollLocked && drawingMode && drawingTool === "erase";
   const isPasteMode = objectClipboard.length > 0;
+  const canShowSelectionControls = !(drawingMode && drawingTool === "erase");
   const canDuplicateGroupSelection = objects.some(
     (object) =>
       selectedObjectIds.includes(object.id) && canDuplicateObject(object)
@@ -3504,7 +3518,8 @@ export function NoteObjectLayer({
           : "pointer-events-none absolute inset-0 z-20"
       }
       style={{
-        touchAction: shouldLockEraserScroll || selectionMode ? "none" : "pan-y",
+        touchAction:
+          shouldLockEraserScroll || selectionMode ? "none" : "pan-y pinch-zoom",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
@@ -3522,6 +3537,9 @@ export function NoteObjectLayer({
 
         if (drawingMode) {
           if (!isDrawingPointer(event)) {
+            if (event.target === event.currentTarget) {
+              onSelectionChange([]);
+            }
             return;
           }
 
@@ -3542,7 +3560,7 @@ export function NoteObjectLayer({
           style={{
             width: pageWidth,
             height: drawingHeight,
-            touchAction: "pan-y",
+            touchAction: "pan-y pinch-zoom",
             WebkitUserSelect: "none",
             userSelect: "none",
             WebkitTouchCallout: "none",
@@ -3629,6 +3647,7 @@ export function NoteObjectLayer({
         const selected =
           canSelectObject &&
           selectedObjectIds.includes(object.id);
+        const showObjectControls = selected && canShowSelectionControls;
 
         if (object.type === "line") {
           const points = getLinePoints(object);
@@ -3671,8 +3690,12 @@ export function NoteObjectLayer({
                   y2={points.endY}
                   stroke="transparent"
                   strokeWidth={Math.max(20, lineStrokeWidth + 14)}
-                  className="pointer-events-auto cursor-move"
-                  style={{ touchAction: "none" }}
+                  className={
+                    canObjectReceivePointer
+                      ? "pointer-events-auto cursor-move"
+                      : "pointer-events-none"
+                  }
+                  style={{ touchAction: canObjectReceivePointer ? "none" : "auto" }}
                   onPointerDown={(event) => {
                     if (!canObjectReceivePointer) return;
                     startDrag(event, object);
@@ -3680,7 +3703,7 @@ export function NoteObjectLayer({
                 />
               </svg>
 
-              {selected && hasSingleSelection && (
+              {showObjectControls && hasSingleSelection && (
                 <>
                   <div
                     className="absolute"
@@ -3828,7 +3851,7 @@ export function NoteObjectLayer({
           >
             {object.type === "textbox" && (
               <div className="relative h-full w-full">
-                {selected && hasSingleSelection && (
+                {showObjectControls && hasSingleSelection && (
                   <>
                     <div
                       className="absolute -top-7 left-0 rounded-md bg-black px-2 py-1 text-xs text-white"
@@ -4111,7 +4134,7 @@ export function NoteObjectLayer({
               </svg>
             )}
 
-            {selected && hasSingleSelection && isVertexShape(object) && (
+            {showObjectControls && hasSingleSelection && isVertexShape(object) && (
               <>
                 <button
                   type="button"
@@ -4172,7 +4195,7 @@ export function NoteObjectLayer({
               </>
             )}
 
-            {selected && hasSingleSelection && isVertexShape(object) && shapeEditMode === "points" &&
+            {showObjectControls && hasSingleSelection && isVertexShape(object) && shapeEditMode === "points" &&
               shapeVertices.map((vertex, index) => (
                 <div
                   key={`${object.id}-vertex-${index}`}
@@ -4184,7 +4207,7 @@ export function NoteObjectLayer({
                 />
               ))}
 
-            {selected && hasSingleSelection && (
+            {showObjectControls && hasSingleSelection && (
               <>
                 {renderActionToolbar()}
 
@@ -4298,7 +4321,7 @@ export function NoteObjectLayer({
         );
       })}
 
-      {selectedGroupBounds && (
+      {selectedGroupBounds && canShowSelectionControls && (
         <>
           <div
             className="pointer-events-none absolute border-2 border-blue-600"

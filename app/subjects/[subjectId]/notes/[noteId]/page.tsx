@@ -2473,7 +2473,11 @@ function addTextBox() {
   }
 
   return (
-    <main ref={scrollContainerRef} className={notePageClass}>
+    <main
+      ref={scrollContainerRef}
+      className={notePageClass}
+      style={{ touchAction: "pan-y pinch-zoom" }}
+    >
       <Link
         href={`/subjects/${subjectId}`}
         className={noteBackButtonClass}
