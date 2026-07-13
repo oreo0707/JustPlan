@@ -434,12 +434,13 @@ function canDuplicateObject(object: NoteObject) {
     object.type === "line" ||
     object.type === "image" ||
     object.type === "sticker" ||
-    object.type === "textbox"
+    object.type === "textbox" ||
+    object.type === "drawing"
   );
 }
 
 function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean) {
-  return !selectionMode && object.type !== "drawing";
+  return !selectionMode;
 }
 
 function canObjectReceivePointerInCurrentMode(
@@ -2032,10 +2033,63 @@ export function NoteObjectLayer({
               object.id === selectedObjectIds[0] && object.type === "image"
           )
         : undefined;
+    const selectedDrawing =
+      selectedObjectIds.length === 1
+        ? objects.find(
+            (object) =>
+              object.id === selectedObjectIds[0] && object.type === "drawing"
+          )
+        : undefined;
 
     return (
       <div className={objectControlPanelClass}>
         {renderMoveActionButton()}
+        {selectedDrawing && (
+          <>
+            <label
+              className={
+                isDark
+                  ? "flex flex-col gap-1 px-2 py-1 text-slate-100"
+                  : "flex flex-col gap-1 px-2 py-1 text-gray-700"
+              }
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              Thickness: {selectedDrawing.strokeWidth ?? 4}px
+              <input
+                type="range"
+                min="1"
+                max="36"
+                value={selectedDrawing.strokeWidth ?? 4}
+                className="w-full"
+                onChange={(event) =>
+                  updateObject(selectedDrawing.id, {
+                    strokeWidth: Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <label
+              className={
+                isDark
+                  ? "flex items-center gap-2 px-2 py-1 text-slate-100"
+                  : "flex items-center gap-2 px-2 py-1 text-gray-700"
+              }
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              Color
+              <input
+                type="color"
+                value={selectedDrawing.color ?? "#111827"}
+                className="h-8 w-10 rounded border"
+                onChange={(event) =>
+                  updateObject(selectedDrawing.id, {
+                    color: event.target.value,
+                  })
+                }
+              />
+            </label>
+          </>
+        )}
         {selectedImage && (
           <button
             type="button"
