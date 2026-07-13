@@ -446,13 +446,9 @@ function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean
 function canObjectReceivePointerInCurrentMode(
   object: NoteObject,
   selectionMode: boolean,
-  drawingMode: boolean,
-  drawingTool: "draw" | "erase" | "highlight"
+  drawingMode: boolean
 ) {
-  return (
-    canSelectObjectInCurrentMode(object, selectionMode) &&
-    !(drawingMode && drawingTool === "erase")
-  );
+  return canSelectObjectInCurrentMode(object, selectionMode) && !drawingMode;
 }
 
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
@@ -1202,6 +1198,22 @@ export function NoteObjectLayer({
     setPendingDrawings(nextDrawings);
   }
 
+  function commitPendingDrawingsToObjects() {
+    const drawingsToCommit = pendingDrawingsRef.current;
+    if (drawingsToCommit.length === 0) {
+      return objectsRef.current;
+    }
+
+    const nextObjects = [...objectsRef.current, ...drawingsToCommit];
+    objectsRef.current = nextObjects;
+    onChangeObjectsRef.current(nextObjects);
+    replacePendingDrawings([]);
+    pendingDrawingUndoStackRef.current = [];
+    pendingDrawingRedoStackRef.current = [];
+
+    return nextObjects;
+  }
+
   function commitDrawingPoints(finalPoints: DrawingPoint[]) {
     clearStraightLineHoldTimer();
     if (straightLineConvertedRef.current) {
@@ -1334,6 +1346,8 @@ export function NoteObjectLayer({
   useEffect(() => {
     if (!selectionMode) return;
 
+    commitPendingDrawingsToObjects();
+
     const activeElement = document.activeElement;
     if (
       activeElement instanceof HTMLElement &&
@@ -1343,6 +1357,10 @@ export function NoteObjectLayer({
     }
 
     savedTextSelectionRef.current = null;
+    // This effect should run only when selection mode opens. The helper reads
+    // the latest objects/drawings through refs so fast Pencil strokes do not
+    // force this effect to re-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionMode]);
 
   useEffect(() => {
@@ -3429,6 +3447,7 @@ export function NoteObjectLayer({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    commitPendingDrawingsToObjects();
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
@@ -3473,7 +3492,7 @@ export function NoteObjectLayer({
 
         if (pathPoints.length >= 3) {
           onSelectionChange(
-            objects
+            objectsRef.current
               .filter((object) =>
                 doesPolygonSelectBox(pathPoints, getObjectBounds(object))
               )
@@ -3521,7 +3540,7 @@ export function NoteObjectLayer({
 
       setSelectionBox(box);
       onSelectionChange(
-        objects
+        objectsRef.current
           .filter((object) => boxesIntersect(box, getObjectBounds(object)))
           .map((object) => object.id)
       );
@@ -3551,7 +3570,7 @@ export function NoteObjectLayer({
   const shouldLockEraserScroll =
     isEraserScrollLocked && drawingMode && drawingTool === "erase";
   const isPasteMode = objectClipboard.length > 0;
-  const canShowSelectionControls = !(drawingMode && drawingTool === "erase");
+  const canShowSelectionControls = !drawingMode;
   const canDuplicateGroupSelection = objects.some(
     (object) =>
       selectedObjectIds.includes(object.id) && canDuplicateObject(object)
@@ -3695,8 +3714,7 @@ export function NoteObjectLayer({
         const canObjectReceivePointer = canObjectReceivePointerInCurrentMode(
           object,
           selectionMode,
-          drawingMode,
-          drawingTool
+          drawingMode
         );
         const selected =
           canSelectObject &&
