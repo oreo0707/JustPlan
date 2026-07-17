@@ -742,19 +742,44 @@ export function NoteObjectLayer({
     };
   }
 
+  function isStylusPointer(event: PointerEvent | React.PointerEvent) {
+    if (event.pointerType === "pen") return true;
+    if (event.pointerType !== "touch") return false;
+
+    const width = event.width ?? 0;
+    const height = event.height ?? 0;
+    const pressure = event.pressure ?? 0;
+
+    return pressure > 0 || (width > 0 && height > 0 && width <= 12 && height <= 12);
+  }
+
   function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType === "pen" || event.pointerType === "mouse";
+    return event.pointerType === "mouse" || isStylusPointer(event);
   }
 
   function isStylusTouch(touch: Touch) {
-    const typedTouch = touch as Touch & { touchType?: string };
+    const typedTouch = touch as Touch & {
+      altitudeAngle?: number;
+      azimuthAngle?: number;
+      touchType?: string;
+    };
     if (typedTouch.touchType === "stylus") return true;
+    if (
+      typeof typedTouch.altitudeAngle === "number" ||
+      typeof typedTouch.azimuthAngle === "number"
+    ) {
+      return true;
+    }
 
     const radiusX = touch.radiusX ?? 0;
     const radiusY = touch.radiusY ?? 0;
     const force = touch.force ?? 0;
 
-    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 8 && radiusY <= 8;
+    if (radiusX > 0 && radiusY > 0 && radiusX <= 12 && radiusY <= 12) return true;
+    if (force <= 0) return false;
+    if (radiusX === 0 || radiusY === 0) return true;
+
+    return radiusX <= 12 && radiusY <= 12;
   }
 
   const lockDocumentScrollForEraserStroke = useCallback(() => {
@@ -1398,7 +1423,7 @@ export function NoteObjectLayer({
   }
 
   function isDrawingPointer(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType === "pen" || event.pointerType === "mouse";
+    return canUsePointerForDrawing(event);
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
@@ -1639,6 +1664,13 @@ export function NoteObjectLayer({
         !drawingModeRef.current ||
         (drawingToolRef.current !== "draw" &&
           drawingToolRef.current !== "highlight")
+      ) {
+        return;
+      }
+
+      if (
+        canvasDrawingPointerIdRef.current !== null ||
+        activeDrawingPointerIdRef.current !== null
       ) {
         return;
       }
