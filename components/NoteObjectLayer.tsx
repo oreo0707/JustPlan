@@ -96,6 +96,21 @@ function getObjectBounds(object: NoteObject): SelectionBox {
   };
 }
 
+function getSelectionHitBounds(object: NoteObject): SelectionBox {
+  const bounds = getObjectBounds(object);
+  const padding =
+    object.type === "line" || object.generatedFromDrawing
+      ? Math.max(10, (object.strokeWidth ?? 4) * 2)
+      : 0;
+
+  return {
+    left: bounds.left - padding,
+    top: bounds.top - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
+  };
+}
+
 function getDrawingPath(points: DrawingPoint[]) {
   if (!points.length) return "";
 
@@ -452,10 +467,9 @@ function canSelectObjectInCurrentMode(object: NoteObject, selectionMode: boolean
 
 function canObjectReceivePointerInCurrentMode(
   object: NoteObject,
-  selectionMode: boolean,
-  drawingMode: boolean
+  selectionMode: boolean
 ) {
-  return canSelectObjectInCurrentMode(object, selectionMode) && !drawingMode;
+  return canSelectObjectInCurrentMode(object, selectionMode);
 }
 
 function getShapeVertices(object: NoteObject): ShapeVertex[] {
@@ -819,7 +833,17 @@ export function NoteObjectLayer({
     const canvas = liveDrawingCanvasRef.current;
     if (!canvas) return null;
 
-    const pixelRatio = (window.devicePixelRatio || 1) * Math.max(1, viewScale);
+    const preferredPixelRatio =
+      (window.devicePixelRatio || 1) * Math.max(1, viewScale);
+    const maxCanvasSide = 4096;
+    const pixelRatio = Math.max(
+      0.25,
+      Math.min(
+        preferredPixelRatio,
+        maxCanvasSide / Math.max(1, pageWidth),
+        maxCanvasSide / Math.max(1, drawingHeight)
+      )
+    );
     const targetWidth = Math.round(pageWidth * pixelRatio);
     const targetHeight = Math.round(drawingHeight * pixelRatio);
 
@@ -1443,7 +1467,14 @@ export function NoteObjectLayer({
     if (!isPointInsidePaper(nextPoint)) return;
 
     const context = prepareLiveDrawingCanvas();
-    if (!context) return;
+    if (!context) {
+      activeDrawingPointerIdRef.current = null;
+      canvasDrawingPointerIdRef.current = null;
+      canvasDrawingTouchIdRef.current = null;
+      activeDrawingPointsRef.current = [];
+      unlockDocumentScrollForEraserStroke();
+      return;
+    }
 
     const points = activeDrawingPointsRef.current;
     const previousPoint = points[points.length - 1];
@@ -1501,12 +1532,59 @@ export function NoteObjectLayer({
   ]);
 
   useEffect(() => {
+    if (!drawingMode) return;
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement &&
+      (activeElement.matches("[data-textbox-editor]") ||
+        activeElement.matches("input, textarea, [contenteditable='true']"))
+    ) {
+      activeElement.blur();
+    }
+
+    window.getSelection()?.removeAllRanges();
+  }, [drawingMode, drawingTool]);
+
+  useEffect(() => {
     if (drawingMode && drawingTool === "erase") {
       return;
     }
 
     unlockDocumentScrollForEraserStroke();
   }, [drawingMode, drawingTool, unlockDocumentScrollForEraserStroke]);
+
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || (!drawingMode && !selectionMode)) return;
+
+    function stopBrowserDrawingUi(event: Event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    layer.addEventListener("contextmenu", stopBrowserDrawingUi, {
+      capture: true,
+    });
+    layer.addEventListener("selectstart", stopBrowserDrawingUi, {
+      capture: true,
+    });
+    layer.addEventListener("dragstart", stopBrowserDrawingUi, {
+      capture: true,
+    });
+
+    return () => {
+      layer.removeEventListener("contextmenu", stopBrowserDrawingUi, {
+        capture: true,
+      });
+      layer.removeEventListener("selectstart", stopBrowserDrawingUi, {
+        capture: true,
+      });
+      layer.removeEventListener("dragstart", stopBrowserDrawingUi, {
+        capture: true,
+      });
+    };
+  }, [drawingMode, selectionMode]);
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -3785,8 +3863,7 @@ export function NoteObjectLayer({
   }
 
   function startSelectionBox(event: React.PointerEvent<HTMLDivElement>) {
-    if (!selectionMode || drawingMode || event.target !== event.currentTarget) return;
-    if (event.pointerType === "touch") return;
+    if (!selectionMode || event.target !== event.currentTarget) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -3839,7 +3916,7 @@ export function NoteObjectLayer({
           onSelectionChange(
             objectsRef.current
               .filter((object) =>
-                doesPolygonSelectBox(pathPoints, getObjectBounds(object))
+                doesPolygonSelectBox(pathPoints, getSelectionHitBounds(object))
               )
               .map((object) => object.id)
           );
@@ -3886,7 +3963,7 @@ export function NoteObjectLayer({
       setSelectionBox(box);
       onSelectionChange(
         objectsRef.current
-          .filter((object) => boxesIntersect(box, getObjectBounds(object)))
+          .filter((object) => boxesIntersect(box, getSelectionHitBounds(object)))
           .map((object) => object.id)
       );
     }
@@ -3981,12 +4058,25 @@ export function NoteObjectLayer({
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
+        WebkitTapHighlightColor: drawingMode || selectionMode ? "transparent" : undefined,
         overscrollBehavior:
           shouldLockEraserScroll ||
           selectionMode ||
           (drawingMode && (drawingTool === "draw" || drawingTool === "highlight"))
             ? "none"
             : "auto",
+      }}
+      onContextMenu={(event) => {
+        if (!drawingMode && !selectionMode) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onDragStart={(event) => {
+        if (!drawingMode && !selectionMode) return;
+
+        event.preventDefault();
+        event.stopPropagation();
       }}
       onPointerDown={(event) => {
         if (isPasteMode && !drawingMode && !selectionMode) {
@@ -3995,6 +4085,11 @@ export function NoteObjectLayer({
           pasteObjectClipboard(
             getLayerPointFromClient(event.clientX, event.clientY)
           );
+          return;
+        }
+
+        if (selectionMode) {
+          startSelectionBox(event);
           return;
         }
 
@@ -4016,7 +4111,9 @@ export function NoteObjectLayer({
         startSelectionBox(event);
       }}
     >
-      {drawingMode && (drawingTool === "draw" || drawingTool === "highlight") && (
+      {drawingMode &&
+        !selectionMode &&
+        (drawingTool === "draw" || drawingTool === "highlight") && (
         <canvas
           ref={liveDrawingCanvasRef}
           className="absolute inset-0 h-full w-full"
@@ -4108,8 +4205,7 @@ export function NoteObjectLayer({
         );
         const canObjectReceivePointer = canObjectReceivePointerInCurrentMode(
           object,
-          selectionMode,
-          drawingMode
+          selectionMode
         );
         const selected = selectedObjectIds.includes(object.id);
         const isRecognizedShape = isRecognizedDrawingShape(object);
@@ -4142,6 +4238,8 @@ export function NoteObjectLayer({
                   ? 80
                   : canFingerUseRecognizedShape
                     ? 78
+                    : drawingMode && canSelectObject
+                      ? 78
                     : canSelectObject
                       ? 40
                       : undefined,
@@ -4188,11 +4286,37 @@ export function NoteObjectLayer({
                         : "auto",
                   }}
                   onPointerDown={(event) => {
+                    const shouldUseFingerSelectionInDrawMode =
+                      drawingMode &&
+                      event.pointerType === "touch" &&
+                      object.type !== "drawing";
+
+                    if (
+                      drawingMode &&
+                      event.pointerType !== "touch" &&
+                      !canFingerUseRecognizedShape
+                    ) {
+                      return;
+                    }
+
                     if (
                       canFingerUseRecognizedShape &&
                       (event.pointerType === "mouse" ||
                         event.pointerType === "pen")
                     ) {
+                      return;
+                    }
+
+                    if (shouldUseFingerSelectionInDrawMode) {
+                      if (selected) {
+                        startDrag(event, object);
+                        return;
+                      }
+
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSelectionChange([object.id]);
+                      setRecognizedShapeMenu(null);
                       return;
                     }
 
@@ -4522,6 +4646,8 @@ export function NoteObjectLayer({
                 ? 80
                 : canFingerUseRecognizedShape
                   ? 78
+                  : drawingMode && canSelectObject
+                    ? 78
                   : canObjectReceivePointer
                     ? 40
                     : undefined,
@@ -4534,6 +4660,19 @@ export function NoteObjectLayer({
               transformOrigin: "center",
             }}
             onPointerDown={(event) => {
+              const shouldUseFingerSelectionInDrawMode =
+                drawingMode &&
+                event.pointerType === "touch" &&
+                object.type !== "drawing";
+
+              if (
+                drawingMode &&
+                event.pointerType !== "touch" &&
+                !isRecognizedShape
+              ) {
+                return;
+              }
+
               if (
                 canFingerUseRecognizedShape &&
                 (event.pointerType === "mouse" || event.pointerType === "pen")
@@ -4549,6 +4688,19 @@ export function NoteObjectLayer({
                   event.pointerType === "touch"
                 )
               ) {
+                return;
+              }
+
+              if (shouldUseFingerSelectionInDrawMode) {
+                if (selected) {
+                  startDrag(event, object);
+                  return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                onSelectionChange([object.id]);
+                setRecognizedShapeMenu(null);
                 return;
               }
 
@@ -4717,20 +4869,36 @@ export function NoteObjectLayer({
                 <div
                   data-textbox-editor={object.id}
                   ref={(editor) => initializeTextBoxEditor(editor, object)}
-                  contentEditable={!selectionMode}
+                  contentEditable={!selectionMode && !drawingMode}
                   suppressContentEditableWarning
-                  tabIndex={selectionMode ? -1 : 0}
+                  tabIndex={selectionMode || drawingMode ? -1 : 0}
                   className="h-full w-full overflow-auto whitespace-pre-wrap border-none bg-transparent p-0 text-gray-950 outline-none empty:before:text-gray-400 empty:before:content-['Type_here...']"
                   style={{
                     color: object.color ?? (isDark ? "#f8fafc" : "#111827"),
                     fontSize: `${object.fontSize ?? 16}px`,
                     fontFamily: object.fontFamily ?? "Arial",
                     lineHeight: "normal",
-                    WebkitUserSelect: selectionMode ? "none" : undefined,
-                    userSelect: selectionMode ? "none" : undefined,
-                    WebkitTouchCallout: selectionMode ? "none" : undefined,
+                    WebkitUserSelect: selectionMode || drawingMode ? "none" : undefined,
+                    userSelect: selectionMode || drawingMode ? "none" : undefined,
+                    WebkitTouchCallout:
+                      selectionMode || drawingMode ? "none" : undefined,
                   }}
                   onPointerDown={(event) => {
+                    if (drawingMode) {
+                      if (event.pointerType !== "touch") return;
+
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.currentTarget.blur();
+                      if (selected) {
+                        startDrag(event, object);
+                        return;
+                      }
+
+                      onSelectionChange([object.id]);
+                      return;
+                    }
+
                     if (selectionMode) {
                       event.preventDefault();
                       event.currentTarget.blur();
