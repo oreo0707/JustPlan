@@ -560,6 +560,11 @@ export function NoteObjectLayer({
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
+  const canvasFingerPanRef = useRef<{
+    lastY: number;
+    scrollElement: HTMLElement | Window;
+    touchId: number;
+  } | null>(null);
   const eraserTouchIdRef = useRef<number | null>(null);
   const activeEraserStrokeRef = useRef<ActiveEraserStroke | null>(null);
   const documentScrollLockRef = useRef<{
@@ -1515,6 +1520,33 @@ export function NoteObjectLayer({
       };
     }
 
+    function getCanvasScrollElement(): HTMLElement | Window {
+      let element = activeCanvas.parentElement;
+
+      while (element) {
+        const styles = window.getComputedStyle(element);
+        const canScrollY =
+          (styles.overflowY === "auto" ||
+            styles.overflowY === "scroll" ||
+            styles.overflowY === "overlay") &&
+          element.scrollHeight > element.clientHeight;
+
+        if (canScrollY) return element;
+        element = element.parentElement;
+      }
+
+      return window;
+    }
+
+    function scrollFingerPanTarget(target: HTMLElement | Window, deltaY: number) {
+      if (target === window) {
+        window.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
+        return;
+      }
+
+      (target as HTMLElement).scrollTop += deltaY;
+    }
+
     function beginCanvasStroke(
       id: number,
       point: DrawingPoint,
@@ -1655,7 +1687,16 @@ export function NoteObjectLayer({
 
       const touch = event.changedTouches[0];
       if (!touch) return;
-      if (!isStylusTouch(touch)) return;
+      if (!isStylusTouch(touch)) {
+        if (event.touches.length === 1) {
+          canvasFingerPanRef.current = {
+            touchId: touch.identifier,
+            lastY: touch.clientY,
+            scrollElement: getCanvasScrollElement(),
+          };
+        }
+        return;
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -1669,6 +1710,20 @@ export function NoteObjectLayer({
     }
 
     function handleTouchMove(event: TouchEvent) {
+      const fingerPan = canvasFingerPanRef.current;
+      if (fingerPan) {
+        const fingerTouch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === fingerPan.touchId
+        );
+        if (!fingerTouch) return;
+
+        event.preventDefault();
+        const deltaY = fingerPan.lastY - fingerTouch.clientY;
+        fingerPan.lastY = fingerTouch.clientY;
+        scrollFingerPanTarget(fingerPan.scrollElement, deltaY);
+        return;
+      }
+
       const touchId = canvasDrawingTouchIdRef.current;
       if (touchId === null) return;
 
@@ -1685,6 +1740,18 @@ export function NoteObjectLayer({
     }
 
     function handleTouchEnd(event: TouchEvent) {
+      const fingerPan = canvasFingerPanRef.current;
+      if (fingerPan) {
+        const endedFingerTouch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === fingerPan.touchId
+        );
+        if (endedFingerTouch) {
+          canvasFingerPanRef.current = null;
+          event.preventDefault();
+          return;
+        }
+      }
+
       const touchId = canvasDrawingTouchIdRef.current;
       if (touchId === null) return;
 
@@ -3886,7 +3953,12 @@ export function NoteObjectLayer({
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
-        overscrollBehavior: shouldLockEraserScroll || selectionMode ? "none" : "auto",
+        overscrollBehavior:
+          shouldLockEraserScroll ||
+          selectionMode ||
+          (drawingMode && (drawingTool === "draw" || drawingTool === "highlight"))
+            ? "none"
+            : "auto",
       }}
       onPointerDown={(event) => {
         if (isPasteMode && !drawingMode && !selectionMode) {
@@ -3924,7 +3996,7 @@ export function NoteObjectLayer({
             width: pageWidth,
             height: drawingHeight,
             zIndex: 76,
-            touchAction: "pan-y",
+            touchAction: "none",
             WebkitUserSelect: "none",
             userSelect: "none",
             WebkitTouchCallout: "none",
