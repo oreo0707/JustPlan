@@ -1540,6 +1540,7 @@ export function NoteObjectLayer({
       straightLineLastPointRef.current = null;
       clearStraightLineHoldTimer();
       activeDrawingPointsRef.current = [];
+      lockDocumentScrollForEraserStroke();
       addLiveCanvasPoint(point);
       onSelectionChange([]);
     }
@@ -1559,6 +1560,7 @@ export function NoteObjectLayer({
       commitDrawingPoints([...activeDrawingPointsRef.current]);
       activeDrawingPointsRef.current = [];
       setActiveDrawingPoints([]);
+      unlockDocumentScrollForEraserStroke();
     }
 
     function handlePointerDown(event: PointerEvent) {
@@ -3194,6 +3196,7 @@ export function NoteObjectLayer({
     activeDrawingPointerIdRef.current = null;
     activeDrawingBoundsRef.current = null;
     clearStraightLineHoldTimer();
+    unlockDocumentScrollForEraserStroke();
 
     if (activeDrawingFrameRef.current !== null) {
       window.cancelAnimationFrame(activeDrawingFrameRef.current);
@@ -3276,6 +3279,7 @@ export function NoteObjectLayer({
     straightLineLastPointRef.current = null;
     clearStraightLineHoldTimer();
     activeDrawingPointsRef.current = [firstPoint];
+    lockDocumentScrollForEraserStroke();
     scheduleStraightLineHold(firstPoint);
     setActiveDrawingPoints([firstPoint]);
     onSelectionChange([]);
