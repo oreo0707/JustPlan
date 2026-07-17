@@ -556,6 +556,7 @@ export function NoteObjectLayer({
   const straightLineHoldEligibleRef = useRef(false);
   const straightLineConvertedRef = useRef(false);
   const straightLineLastPointRef = useRef<DrawingPoint | null>(null);
+  const straightLineHoldStartedAtRef = useRef(0);
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
@@ -1282,10 +1283,12 @@ export function NoteObjectLayer({
       const holdPoint = straightLineLastPointRef.current;
       if (!lastPoint || !holdPoint) return;
 
+      const holdStartedAt = straightLineHoldStartedAtRef.current;
+      const hasDrawnLongEnough = holdStartedAt > 0 && Date.now() - holdStartedAt > 900;
       const hasStayedStill =
         Math.hypot(lastPoint.x - holdPoint.x, lastPoint.y - holdPoint.y) <= 3;
 
-      if (hasStayedStill) {
+      if (hasStayedStill && hasDrawnLongEnough) {
         convertActiveDrawingToRecognizedShape();
       }
     }, 560);
@@ -1414,7 +1417,6 @@ export function NoteObjectLayer({
     if (!previousPoint) {
       points.push(nextPoint);
       scheduleStraightLineHold(nextPoint);
-      scheduleActiveDrawingPaint();
       context.beginPath();
       context.moveTo(nextPoint.x, nextPoint.y);
       context.lineTo(nextPoint.x + 0.01, nextPoint.y + 0.01);
@@ -1431,7 +1433,6 @@ export function NoteObjectLayer({
 
     points.push(nextPoint);
     scheduleStraightLineHold(nextPoint);
-    scheduleActiveDrawingPaint();
     context.beginPath();
     context.moveTo(previousPoint.x, previousPoint.y);
     context.lineTo(nextPoint.x, nextPoint.y);
@@ -3270,6 +3271,7 @@ export function NoteObjectLayer({
     activeDrawingMinDistanceRef.current = minPointDistance;
     straightLineHoldEligibleRef.current =
       canStraighten && drawingToolRef.current === "draw";
+    straightLineHoldStartedAtRef.current = Date.now();
     straightLineConvertedRef.current = false;
     straightLineLastPointRef.current = null;
     clearStraightLineHoldTimer();
