@@ -742,12 +742,19 @@ export function NoteObjectLayer({
     };
   }
 
-  function isStylusTouch(touch: Touch) {
-    return (touch as Touch & { touchType?: string }).touchType === "stylus";
+  function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
+    return event.pointerType === "pen" || event.pointerType === "mouse";
   }
 
-  function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType !== "touch";
+  function isStylusTouch(touch: Touch) {
+    const typedTouch = touch as Touch & { touchType?: string };
+    if (typedTouch.touchType === "stylus") return true;
+
+    const radiusX = touch.radiusX ?? 0;
+    const radiusY = touch.radiusY ?? 0;
+    const force = touch.force ?? 0;
+
+    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 8 && radiusY <= 8;
   }
 
   const lockDocumentScrollForEraserStroke = useCallback(() => {
@@ -3407,15 +3414,7 @@ export function NoteObjectLayer({
 
       const touch = event.changedTouches[0];
       if (!touch) return;
-      if (!isStylusTouch(touch)) {
-        if (
-          event.touches.length === 1 &&
-          (event.target === drawingLayer || event.target === layerRef.current)
-        ) {
-          onSelectionChangeRef.current([]);
-        }
-        return;
-      }
+      if (!isStylusTouch(touch)) return;
 
       event.preventDefault();
       event.stopPropagation();
