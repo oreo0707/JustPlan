@@ -543,6 +543,7 @@ export function NoteObjectLayer({
   const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
   const pendingDrawingRedoStackRef = useRef<NoteObject[][]>([]);
   const tabletGestureRef = useRef<{
+    action: "undo" | "redo";
     touchCount: 2 | 3;
     startTime: number;
     startX: number;
@@ -3352,8 +3353,26 @@ export function NoteObjectLayer({
       };
     }
 
-    function handleGestureTouchStart() {
+    function handleGestureTouchStart(event: TouchEvent) {
       tabletGestureRef.current = null;
+
+      if (!drawingModeRef.current) return;
+      if (activeDrawingPointerIdRef.current !== null || eraserTouchIdRef.current !== null) {
+        return;
+      }
+      if (event.touches.length !== 2 && event.touches.length !== 3) return;
+
+      const center = getTouchCentroid(event.touches);
+      tabletGestureRef.current = {
+        action: event.touches.length === 2 ? "undo" : "redo",
+        touchCount: event.touches.length,
+        startTime: Date.now(),
+        startX: center.x,
+        startY: center.y,
+        maxDistance: 0,
+      };
+
+      event.preventDefault();
     }
 
     function handleGestureTouchMove(event: TouchEvent) {
@@ -3388,7 +3407,11 @@ export function NoteObjectLayer({
       const duration = Date.now() - gesture.startTime;
       if (duration > 420 || gesture.maxDistance > 28) return;
 
-      redoPendingDrawingStroke();
+      if (gesture.action === "undo") {
+        undoPendingDrawingStroke();
+      } else {
+        redoPendingDrawingStroke();
+      }
     }
 
     function handleNativePointerDown(event: PointerEvent) {
@@ -3943,6 +3966,7 @@ export function NoteObjectLayer({
             width: pageWidth,
             height: drawingHeight,
             zIndex: 76,
+            pointerEvents: "none",
             touchAction: "pan-y",
             WebkitUserSelect: "none",
             userSelect: "none",
