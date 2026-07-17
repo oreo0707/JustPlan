@@ -5250,6 +5250,22 @@ export function NoteObjectLayer({
             }}
           />
           <div
+            className="pointer-events-auto absolute touch-none cursor-move"
+            title="Move formed shape"
+            style={{
+              left: selectedRecognizedShapeBounds.left,
+              top: selectedRecognizedShapeBounds.top,
+              width: selectedRecognizedShapeBounds.width,
+              height: selectedRecognizedShapeBounds.height,
+              zIndex: 83,
+            }}
+            onPointerDown={(event) => {
+              if (event.pointerType !== "touch") return;
+
+              startDrag(event, selectedRecognizedShape);
+            }}
+          />
+          <div
             className={`pointer-events-auto absolute flex h-7 w-7 touch-none cursor-grab items-center justify-center rounded-full border-2 border-blue-600 text-sm leading-none shadow-sm ${
               isDark
                 ? "bg-slate-900 text-slate-100"
