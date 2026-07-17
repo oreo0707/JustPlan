@@ -556,7 +556,6 @@ export function NoteObjectLayer({
   const straightLineHoldEligibleRef = useRef(false);
   const straightLineConvertedRef = useRef(false);
   const straightLineLastPointRef = useRef<DrawingPoint | null>(null);
-  const straightLineHoldStartedAtRef = useRef(0);
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
@@ -1246,7 +1245,36 @@ export function NoteObjectLayer({
     return null;
   }
 
-  function convertActiveDrawingToRecognizedShape() {
+  function createStraightLineFromStroke(points: DrawingPoint[]): NoteObject | null {
+    if (points.length < 2) return null;
+
+    const firstPoint = points[0];
+    const lastPoint = points[points.length - 1];
+    const endDistance = Math.hypot(
+      lastPoint.x - firstPoint.x,
+      lastPoint.y - firstPoint.y
+    );
+
+    if (endDistance < 24) return null;
+
+    return {
+      id: crypto.randomUUID(),
+      type: "line" as const,
+      x: clampValue(firstPoint.x, 0, pageWidth),
+      y: clampValue(firstPoint.y, 0, drawingHeight),
+      endX: clampValue(lastPoint.x, 0, pageWidth),
+      endY: clampValue(lastPoint.y, 0, drawingHeight),
+      width: Math.max(1, Math.abs(lastPoint.x - firstPoint.x)),
+      height: Math.max(1, Math.abs(lastPoint.y - firstPoint.y)),
+      color: drawingColorRef.current,
+      strokeWidth: drawingStrokeWidthRef.current,
+      generatedFromDrawing: true,
+      flipX: false,
+      flipY: false,
+    };
+  }
+
+  function convertActiveDrawingToRecognizedShape(forceStraightLine = false) {
     if (
       !straightLineHoldEligibleRef.current ||
       straightLineConvertedRef.current ||
@@ -1258,7 +1286,10 @@ export function NoteObjectLayer({
     const points = activeDrawingPointsRef.current;
     if (points.length < 2) return;
 
-    const recognizedObject = createRecognizedStrokeObject(points);
+    const recognizedObject =
+      forceStraightLine
+        ? createStraightLineFromStroke(points) ?? createRecognizedStrokeObject(points)
+        : createRecognizedStrokeObject(points);
     if (!recognizedObject) return;
 
     straightLineConvertedRef.current = true;
@@ -1288,13 +1319,11 @@ export function NoteObjectLayer({
       const holdPoint = straightLineLastPointRef.current;
       if (!lastPoint || !holdPoint) return;
 
-      const holdStartedAt = straightLineHoldStartedAtRef.current;
-      const hasDrawnLongEnough = holdStartedAt > 0 && Date.now() - holdStartedAt > 900;
       const hasStayedStill =
         Math.hypot(lastPoint.x - holdPoint.x, lastPoint.y - holdPoint.y) <= 3;
 
-      if (hasStayedStill && hasDrawnLongEnough) {
-        convertActiveDrawingToRecognizedShape();
+      if (hasStayedStill) {
+        convertActiveDrawingToRecognizedShape(true);
       }
     }, 560);
   }
@@ -3341,7 +3370,6 @@ export function NoteObjectLayer({
     activeDrawingMinDistanceRef.current = minPointDistance;
     straightLineHoldEligibleRef.current =
       canStraighten && drawingToolRef.current === "draw";
-    straightLineHoldStartedAtRef.current = Date.now();
     straightLineConvertedRef.current = false;
     straightLineLastPointRef.current = null;
     clearStraightLineHoldTimer();
