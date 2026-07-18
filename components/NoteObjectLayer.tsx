@@ -762,7 +762,11 @@ export function NoteObjectLayer({
   }
 
   function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType === "pen" || event.pointerType === "mouse";
+    return (
+      event.pointerType === "pen" ||
+      event.pointerType === "mouse" ||
+      event.pointerType === ""
+    );
   }
 
   function isStylusTouch(touch: Touch) {
@@ -3689,6 +3693,17 @@ export function NoteObjectLayer({
       const touch = event.changedTouches[0];
       if (!touch) return;
       if (!isStylusTouch(touch)) {
+        if (
+          event.touches.length === 1 &&
+          (drawingToolRef.current === "draw" ||
+            drawingToolRef.current === "highlight")
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          startTouchDrawingOrErasing(touch);
+          return;
+        }
+
         if (event.touches.length === 1) {
           canvasFingerPanRef.current = {
             touchId: touch.identifier,
