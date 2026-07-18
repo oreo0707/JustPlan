@@ -9,7 +9,13 @@ type NoteObjectLayerProps = {
   objects: NoteObject[];
   selectedObjectIds: string[];
   onSelectionChange: (ids: string[]) => void;
-  onChangeObjects: (objects: NoteObject[]) => void;
+  onChangeObjects: (
+    objects: NoteObject[],
+    options?: {
+      historySnapshot?: NoteObject[];
+      recordHistory?: boolean;
+    }
+  ) => void;
   selectionMode: boolean;
   selectionTool?: "rectangle" | "lasso";
   drawingMode: boolean;
@@ -556,13 +562,6 @@ export function NoteObjectLayer({
   const activeDrawingFrameRef = useRef<number | null>(null);
   const pendingDrawingUndoStackRef = useRef<NoteObject[][]>([]);
   const pendingDrawingRedoStackRef = useRef<NoteObject[][]>([]);
-  const tabletGestureRef = useRef<{
-    touchCount: 2 | 3;
-    startTime: number;
-    startX: number;
-    startY: number;
-    maxDistance: number;
-  } | null>(null);
   const activeDrawingPointerIdRef = useRef<number | null>(null);
   const activeDrawingBoundsRef = useRef<DOMRect | null>(null);
   const activeDrawingMinDistanceRef = useRef(1);
@@ -3274,10 +3273,12 @@ export function NoteObjectLayer({
     lockDocumentScrollForEraserStroke();
     setIsEraserScrollLocked(true);
     onSelectionChangeRef.current([]);
+    const originalObjects = objectsRef.current;
     let workingObjects = objectsRef.current;
     let workingPendingDrawings = pendingDrawingsRef.current;
     const eraserRadius = Math.max(2, drawingStrokeWidthRef.current / 2);
     let pendingUndoSnapshotCaptured = false;
+    let savedChangedDuringStroke = false;
 
     function eraseAt(point: DrawingPoint) {
       if (!isPointInsidePaper(point)) return;
@@ -3302,7 +3303,8 @@ export function NoteObjectLayer({
       if (savedChanged) {
         workingObjects = nextObjects;
         objectsRef.current = nextObjects;
-        onChangeObjectsRef.current(nextObjects);
+        savedChangedDuringStroke = true;
+        onChangeObjectsRef.current(nextObjects, { recordHistory: false });
       }
 
       if (pendingChanged) {
@@ -3325,6 +3327,12 @@ export function NoteObjectLayer({
       setEraserPoint(null);
       setIsEraserScrollLocked(false);
       unlockDocumentScrollForEraserStroke();
+
+      if (savedChangedDuringStroke) {
+        onChangeObjectsRef.current(workingObjects, {
+          historySnapshot: originalObjects,
+        });
+      }
     }
 
     eraseAt(initialPoint);
@@ -3473,12 +3481,11 @@ export function NoteObjectLayer({
       flipY: false,
     };
 
-    const currentPendingDrawings = pendingDrawingsRef.current;
-    const nextPendingDrawings = [...currentPendingDrawings, newDrawing];
-
-    pushPendingDrawingUndoSnapshot(currentPendingDrawings);
+    const nextObjects = [...objectsRef.current, newDrawing];
+    objectsRef.current = nextObjects;
     pendingDrawingRedoStackRef.current = [];
-    replacePendingDrawings(nextPendingDrawings);
+    replacePendingDrawings([]);
+    onChangeObjectsRef.current(nextObjects);
     onSelectionChange([]);
   }
 
@@ -3552,82 +3559,6 @@ export function NoteObjectLayer({
     if (!drawingLayer) return;
     const activeDrawingLayer = drawingLayer;
 
-    function getTouchCentroid(touches: TouchList) {
-      const touchItems = Array.from(touches);
-      const total = touchItems.reduce(
-        (sum, touch) => ({
-          x: sum.x + touch.clientX,
-          y: sum.y + touch.clientY,
-        }),
-        { x: 0, y: 0 }
-      );
-
-      return {
-        x: total.x / Math.max(1, touchItems.length),
-        y: total.y / Math.max(1, touchItems.length),
-      };
-    }
-
-    function handleGestureTouchStart(event: TouchEvent) {
-      if (!drawingModeRef.current) {
-        tabletGestureRef.current = null;
-        return;
-      }
-
-      if (event.touches.length !== 2 && event.touches.length !== 3) {
-        tabletGestureRef.current = null;
-        return;
-      }
-
-      const center = getTouchCentroid(event.touches);
-      tabletGestureRef.current = {
-        touchCount: event.touches.length as 2 | 3,
-        startTime: Date.now(),
-        startX: center.x,
-        startY: center.y,
-        maxDistance: 0,
-      };
-    }
-
-    function handleGestureTouchMove(event: TouchEvent) {
-      if (event.defaultPrevented) {
-        tabletGestureRef.current = null;
-        return;
-      }
-
-      const gesture = tabletGestureRef.current;
-      if (!gesture) return;
-
-      if (event.touches.length !== gesture.touchCount) {
-        tabletGestureRef.current = null;
-        return;
-      }
-
-      const center = getTouchCentroid(event.touches);
-      gesture.maxDistance = Math.max(
-        gesture.maxDistance,
-        Math.hypot(center.x - gesture.startX, center.y - gesture.startY)
-      );
-    }
-
-    function handleGestureTouchEnd(event: TouchEvent) {
-      const gesture = tabletGestureRef.current;
-      if (!gesture) return;
-
-      if (event.touches.length > 0) return;
-
-      tabletGestureRef.current = null;
-
-      const duration = Date.now() - gesture.startTime;
-      if (duration > 420 || gesture.maxDistance > 28) return;
-
-      if (gesture.touchCount === 2) {
-        undoPendingDrawingStroke();
-      } else {
-        redoPendingDrawingStroke();
-      }
-    }
-
     function handleNativePointerDown(event: PointerEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
       if (activeDrawingPointerIdRef.current === event.pointerId) return;
@@ -3676,6 +3607,18 @@ export function NoteObjectLayer({
       if (!layerBounds) return null;
 
       return getPointInBounds(touch.clientX, touch.clientY, layerBounds);
+    }
+
+    function isTouchInsideLayer(touch: Touch) {
+      const layerBounds = layerRef.current?.getBoundingClientRect();
+      if (!layerBounds) return false;
+
+      return (
+        touch.clientX >= layerBounds.left &&
+        touch.clientX <= layerBounds.right &&
+        touch.clientY >= layerBounds.top &&
+        touch.clientY <= layerBounds.bottom
+      );
     }
 
     function getLayerScrollElement(): HTMLElement | Window {
@@ -3751,7 +3694,7 @@ export function NoteObjectLayer({
       const touch = event.changedTouches[0];
       if (!touch) return;
       if (!isStylusTouch(touch)) {
-        if (event.touches.length === 1) {
+        if (event.touches.length === 1 && isTouchInsideLayer(touch)) {
           canvasFingerPanRef.current = {
             touchId: touch.identifier,
             lastY: touch.clientY,
@@ -3879,10 +3822,6 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
-    document.addEventListener("touchstart", handleGestureTouchStart, {
-      passive: false,
-      capture: true,
-    });
     document.addEventListener("touchstart", handleNativeTouchStart, {
       passive: false,
       capture: true,
@@ -3905,15 +3844,7 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
-    window.addEventListener("touchmove", handleGestureTouchMove, {
-      passive: false,
-      capture: true,
-    });
     window.addEventListener("touchend", handleNativeTouchEnd, {
-      passive: false,
-      capture: true,
-    });
-    window.addEventListener("touchend", handleGestureTouchEnd, {
       passive: false,
       capture: true,
     });
@@ -3921,16 +3852,9 @@ export function NoteObjectLayer({
       passive: false,
       capture: true,
     });
-    window.addEventListener("touchcancel", handleGestureTouchEnd, {
-      passive: false,
-      capture: true,
-    });
 
     return () => {
       document.removeEventListener("pointerdown", handleNativePointerDown, {
-        capture: true,
-      });
-      document.removeEventListener("touchstart", handleGestureTouchStart, {
         capture: true,
       });
       document.removeEventListener("touchstart", handleNativeTouchStart, {
@@ -3951,19 +3875,10 @@ export function NoteObjectLayer({
       window.removeEventListener("touchmove", handleNativeTouchMove, {
         capture: true,
       });
-      window.removeEventListener("touchmove", handleGestureTouchMove, {
-        capture: true,
-      });
       window.removeEventListener("touchend", handleNativeTouchEnd, {
         capture: true,
       });
-      window.removeEventListener("touchend", handleGestureTouchEnd, {
-        capture: true,
-      });
       window.removeEventListener("touchcancel", handleNativeTouchEnd, {
-        capture: true,
-      });
-      window.removeEventListener("touchcancel", handleGestureTouchEnd, {
         capture: true,
       });
     };

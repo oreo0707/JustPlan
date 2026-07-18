@@ -105,6 +105,9 @@ export default function NoteEditorPage() {
     }>
   >([]);
   const isApplyingHistoryRef = useRef(false);
+  const contentStateRef = useRef("");
+  const objectsStateRef = useRef<NoteObject[]>([]);
+  const templateStateRef = useRef<NoteTemplate>("plain");
   const pageWidth = 794;
   const pageHeight = 1123;
   const PAGE_CLIPBOARD_KEY = "just-study-page-clipboard";
@@ -112,6 +115,12 @@ export default function NoteEditorPage() {
   const [cursorStyle, setCursorStyle] = useState<
     "default" | "y2k-arrow" | "heart" | "cute-pointer" | "star"
   >("default");
+
+  useEffect(() => {
+    contentStateRef.current = content;
+    objectsStateRef.current = objects;
+    templateStateRef.current = template;
+  }, [content, objects, template]);
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -128,6 +137,9 @@ export default function NoteEditorPage() {
 
       setSubject(foundSubject ?? null);
       setNote(foundNote ?? null);
+      contentStateRef.current = foundNote?.content ?? "";
+      templateStateRef.current = foundNote?.template ?? "plain";
+      objectsStateRef.current = foundNote?.objects ?? [];
       setContent(foundNote?.content ?? "");
       setTemplate(foundNote?.template ?? "plain");
       setObjects(foundNote?.objects ?? []);
@@ -225,9 +237,9 @@ export default function NoteEditorPage() {
 
   function getCurrentUndoSnapshot() {
     return {
-      content,
-      objects,
-      template,
+      content: contentStateRef.current,
+      objects: objectsStateRef.current,
+      template: templateStateRef.current,
     };
   }
 
@@ -237,6 +249,9 @@ export default function NoteEditorPage() {
     template: NoteTemplate;
   }) {
     isApplyingHistoryRef.current = true;
+    contentStateRef.current = snapshot.content;
+    objectsStateRef.current = snapshot.objects;
+    templateStateRef.current = snapshot.template;
     setContent(snapshot.content);
     setObjects(snapshot.objects);
     setTemplate(snapshot.template);
@@ -344,6 +359,7 @@ export default function NoteEditorPage() {
 
   function handleChangeTemplate(newTemplate: NoteTemplate) {
   pushUndoSnapshot();
+  templateStateRef.current = newTemplate;
   setTemplate(newTemplate);
   setIsNoteSaved(false);
 
@@ -358,8 +374,38 @@ export default function NoteEditorPage() {
   }
   
 
-  function handleChangeObjects(newObjects: NoteObject[]) {
-    pushUndoSnapshot();
+  function handleChangeObjects(
+    newObjects: NoteObject[],
+    options: { historySnapshot?: NoteObject[]; recordHistory?: boolean } = {}
+  ) {
+    if (options.recordHistory !== false) {
+      if (options.historySnapshot) {
+        const latestSnapshot = undoStackRef.current.at(-1);
+        const nextSnapshot = {
+          content: contentStateRef.current,
+          objects: options.historySnapshot,
+          template: templateStateRef.current,
+        };
+
+        if (
+          !latestSnapshot ||
+          latestSnapshot.content !== nextSnapshot.content ||
+          latestSnapshot.template !== nextSnapshot.template ||
+          JSON.stringify(latestSnapshot.objects) !==
+            JSON.stringify(nextSnapshot.objects)
+        ) {
+          undoStackRef.current = [
+            ...undoStackRef.current.slice(-49),
+            nextSnapshot,
+          ];
+          redoStackRef.current = [];
+          drawingObjectRedoStackRef.current = [];
+        }
+      } else {
+        pushUndoSnapshot();
+      }
+    }
+    objectsStateRef.current = newObjects;
     setObjects(newObjects);
     if (skipNextObjectDirtyMarkRef.current) {
       skipNextObjectDirtyMarkRef.current = false;
@@ -855,6 +901,7 @@ export default function NoteEditorPage() {
 
   function handleChangeContent(nextContent: string) {
     if (isApplyingHistoryRef.current) {
+      contentStateRef.current = nextContent;
       setContent(nextContent);
       return;
     }
@@ -863,6 +910,7 @@ export default function NoteEditorPage() {
       pushUndoSnapshot();
     }
 
+    contentStateRef.current = nextContent;
     setContent(nextContent);
     if (nextContent !== content) {
       setIsNoteSaved(false);
