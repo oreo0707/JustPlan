@@ -761,11 +761,15 @@ export function NoteObjectLayer({
     };
   }
 
-  function canUsePointerForDrawing(event: PointerEvent | React.PointerEvent) {
+  function canUsePointerForDrawing(
+    event: PointerEvent | React.PointerEvent,
+    allowTouch = false
+  ) {
     return (
       event.pointerType === "pen" ||
       event.pointerType === "mouse" ||
-      event.pointerType === ""
+      event.pointerType === "" ||
+      (allowTouch && event.pointerType === "touch")
     );
   }
 
@@ -1466,7 +1470,12 @@ export function NoteObjectLayer({
   }
 
   function isDrawingPointer(event: PointerEvent | React.PointerEvent) {
-    return event.pointerType === "pen" || event.pointerType === "mouse";
+    return canUsePointerForDrawing(
+      event,
+      drawingModeRef.current &&
+        (drawingToolRef.current === "draw" ||
+          drawingToolRef.current === "highlight")
+    );
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
@@ -3493,7 +3502,7 @@ export function NoteObjectLayer({
 
   function startDrawing(event: PointerEvent) {
     if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
-    if (!canUsePointerForDrawing(event)) return;
+    if (!canUsePointerForDrawing(event, true)) return;
     if (
       event.pointerType !== "pen" &&
       Date.now() < suppressPointerDrawingUntilRef.current
