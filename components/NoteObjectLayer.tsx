@@ -1613,6 +1613,14 @@ export function NoteObjectLayer({
   }, [unlockDocumentScrollForEraserStroke]);
 
   useEffect(() => {
+    if (liveDrawingCanvasRef.current?.classList.contains("hidden")) {
+      canvasDrawingPointerIdRef.current = null;
+      canvasDrawingTouchIdRef.current = null;
+      canvasFingerPanRef.current = null;
+      clearLiveDrawingCanvas();
+      return;
+    }
+
     const canvas = liveDrawingCanvasRef.current;
     if (!canvas) return;
     const activeCanvas = canvas;
@@ -3565,6 +3573,7 @@ export function NoteObjectLayer({
 
     function handleNativePointerDown(event: PointerEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      if (activeDrawingPointerIdRef.current === event.pointerId) return;
       startDrawing(event);
     }
 
@@ -4121,31 +4130,17 @@ export function NoteObjectLayer({
 
           if (drawingTool === "erase") {
             startErasing(event);
+            return;
           }
 
+          startDrawing(event.nativeEvent);
           return;
         }
 
         startSelectionBox(event);
       }}
     >
-      {drawingMode &&
-        !selectionMode &&
-        (drawingTool === "draw" || drawingTool === "highlight") && (
-        <canvas
-          ref={liveDrawingCanvasRef}
-          className="absolute inset-0 h-full w-full"
-          style={{
-            width: pageWidth,
-            height: drawingHeight,
-            zIndex: 76,
-            touchAction: "none",
-            WebkitUserSelect: "none",
-            userSelect: "none",
-            WebkitTouchCallout: "none",
-          }}
-        />
-      )}
+      <canvas ref={liveDrawingCanvasRef} className="hidden" />
 
       {drawingMode && drawingTool === "erase" && eraserPoint && (
         <div
