@@ -3515,6 +3515,14 @@ export function NoteObjectLayer({
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
+    if (
+      event.clientX < layerBounds.left ||
+      event.clientX > layerBounds.right ||
+      event.clientY < layerBounds.top ||
+      event.clientY > layerBounds.bottom
+    ) {
+      return;
+    }
 
     activeDrawingBoundsRef.current = layerBounds;
 
@@ -3680,6 +3688,14 @@ export function NoteObjectLayer({
 
       const layerBounds = layerRef.current?.getBoundingClientRect();
       if (!layerBounds) return false;
+      if (
+        touch.clientX < layerBounds.left ||
+        touch.clientX > layerBounds.right ||
+        touch.clientY < layerBounds.top ||
+        touch.clientY > layerBounds.bottom
+      ) {
+        return false;
+      }
 
       activeDrawingBoundsRef.current = layerBounds;
       startDrawingStroke(
@@ -3698,6 +3714,7 @@ export function NoteObjectLayer({
     function handleNativeTouchStart(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
       if (!drawingModeRef.current) return;
+      if (activeDrawingPointerIdRef.current !== null) return;
 
       const touch = event.changedTouches[0];
       if (!touch) return;
@@ -3836,15 +3853,15 @@ export function NoteObjectLayer({
       finishActiveDrawing(activeTouchId);
     }
 
-    drawingLayer.addEventListener("pointerdown", handleNativePointerDown, {
+    document.addEventListener("pointerdown", handleNativePointerDown, {
       passive: false,
       capture: true,
     });
-    drawingLayer.addEventListener("touchstart", handleGestureTouchStart, {
+    document.addEventListener("touchstart", handleGestureTouchStart, {
       passive: false,
       capture: true,
     });
-    drawingLayer.addEventListener("touchstart", handleNativeTouchStart, {
+    document.addEventListener("touchstart", handleNativeTouchStart, {
       passive: false,
       capture: true,
     });
@@ -3888,13 +3905,13 @@ export function NoteObjectLayer({
     });
 
     return () => {
-      drawingLayer.removeEventListener("pointerdown", handleNativePointerDown, {
+      document.removeEventListener("pointerdown", handleNativePointerDown, {
         capture: true,
       });
-      drawingLayer.removeEventListener("touchstart", handleGestureTouchStart, {
+      document.removeEventListener("touchstart", handleGestureTouchStart, {
         capture: true,
       });
-      drawingLayer.removeEventListener("touchstart", handleNativeTouchStart, {
+      document.removeEventListener("touchstart", handleNativeTouchStart, {
         capture: true,
       });
       window.removeEventListener("pointermove", handleNativePointerMove, {
