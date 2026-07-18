@@ -837,15 +837,15 @@ export function NoteObjectLayer({
       (window.devicePixelRatio || 1) * Math.max(1, viewScale);
     const maxCanvasSide = 4096;
     const pixelRatio = Math.max(
-      0.25,
+      0.01,
       Math.min(
         preferredPixelRatio,
         maxCanvasSide / Math.max(1, pageWidth),
         maxCanvasSide / Math.max(1, drawingHeight)
       )
     );
-    const targetWidth = Math.round(pageWidth * pixelRatio);
-    const targetHeight = Math.round(drawingHeight * pixelRatio);
+    const targetWidth = Math.max(1, Math.round(pageWidth * pixelRatio));
+    const targetHeight = Math.max(1, Math.round(drawingHeight * pixelRatio));
 
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth;
@@ -1927,10 +1927,11 @@ export function NoteObjectLayer({
       window.removeEventListener("blur", recoverStaleCanvasStroke);
       document.removeEventListener("visibilitychange", recoverStaleCanvasStroke);
     };
-    // Canvas drawing intentionally reads current settings through refs so the
-    // listeners stay stable while the user writes quickly.
+    // Canvas drawing intentionally reads tool settings through refs so the
+    // listeners stay stable while the user writes quickly. Dimensions stay in
+    // dependencies because the note can gain pages while the editor is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawingMode, drawingTool, viewScale]);
+  }, [drawingHeight, drawingMode, drawingTool, pageWidth, viewScale]);
 
   useEffect(() => {
     if (
