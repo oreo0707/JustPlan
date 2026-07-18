@@ -772,8 +772,11 @@ export function NoteObjectLayer({
     const radiusX = touch.radiusX ?? 0;
     const radiusY = touch.radiusY ?? 0;
     const force = touch.force ?? 0;
+    const largestRadius = Math.max(radiusX, radiusY);
 
-    return force > 0 && radiusX > 0 && radiusY > 0 && radiusX <= 8 && radiusY <= 8;
+    if (largestRadius > 0 && largestRadius <= 10) return true;
+
+    return force > 0.01 && (largestRadius === 0 || largestRadius <= 12);
   }
 
   const lockDocumentScrollForEraserStroke = useCallback(() => {
@@ -3649,6 +3652,36 @@ export function NoteObjectLayer({
       (target as HTMLElement).scrollTop += deltaY;
     }
 
+    function startTouchDrawingOrErasing(touch: Touch) {
+      eventSuppressPointerDrawing();
+
+      if (drawingToolRef.current === "erase") {
+        const point = getLayerTouchPoint(touch);
+        const eraserStrokeStarter = beginEraserStrokeRef.current;
+        if (!point || !eraserStrokeStarter) return false;
+
+        eraserTouchIdRef.current = touch.identifier;
+        activeEraserStrokeRef.current = eraserStrokeStarter(point);
+        return true;
+      }
+
+      const layerBounds = layerRef.current?.getBoundingClientRect();
+      if (!layerBounds) return false;
+
+      activeDrawingBoundsRef.current = layerBounds;
+      startDrawingStroke(
+        -touch.identifier - 1,
+        getPointInBounds(touch.clientX, touch.clientY, layerBounds),
+        0.1,
+        true
+      );
+      return true;
+    }
+
+    function eventSuppressPointerDrawing() {
+      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
+    }
+
     function handleNativeTouchStart(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
       if (!drawingModeRef.current) return;
@@ -3668,28 +3701,7 @@ export function NoteObjectLayer({
 
       event.preventDefault();
       event.stopPropagation();
-      suppressPointerDrawingUntilRef.current = Date.now() + 1000;
-
-      if (drawingToolRef.current === "erase") {
-        const point = getLayerTouchPoint(touch);
-        const eraserStrokeStarter = beginEraserStrokeRef.current;
-        if (!point || !eraserStrokeStarter) return;
-
-        eraserTouchIdRef.current = touch.identifier;
-        activeEraserStrokeRef.current = eraserStrokeStarter(point);
-        return;
-      }
-
-      const layerBounds = layerRef.current?.getBoundingClientRect();
-      if (!layerBounds) return;
-
-      activeDrawingBoundsRef.current = layerBounds;
-      startDrawingStroke(
-        -touch.identifier - 1,
-        getPointInBounds(touch.clientX, touch.clientY, layerBounds),
-        0.1,
-        true
-      );
+      startTouchDrawingOrErasing(touch);
     }
 
     function handleNativeTouchMove(event: TouchEvent) {
@@ -3701,6 +3713,14 @@ export function NoteObjectLayer({
           (item) => item.identifier === fingerPan.touchId
         );
         if (!fingerTouch) return;
+
+        if (drawingModeRef.current && isStylusTouch(fingerTouch)) {
+          canvasFingerPanRef.current = null;
+          event.preventDefault();
+          event.stopPropagation();
+          startTouchDrawingOrErasing(fingerTouch);
+          return;
+        }
 
         event.preventDefault();
         const deltaY = fingerPan.lastY - fingerTouch.clientY;
