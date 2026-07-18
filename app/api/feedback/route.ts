@@ -53,6 +53,50 @@ function buildWebhookText(feedback: {
   ].join("\n");
 }
 
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 1))}…`
+    : value;
+}
+
+function buildDiscordWebhookBody(feedback: {
+  category: FeedbackCategory;
+  rating: number | null;
+  message: string;
+  page: string;
+  createdAt: string;
+}) {
+  return {
+    username: "Just Plan Feedback",
+    allowed_mentions: { parse: [] },
+    embeds: [
+      {
+        title: "New anonymous Just Plan feedback",
+        color: 5814783,
+        description: truncateText(feedback.message, 4000),
+        fields: [
+          {
+            name: "Category",
+            value: feedback.category,
+            inline: true,
+          },
+          {
+            name: "Rating",
+            value: String(feedback.rating ?? "Not provided"),
+            inline: true,
+          },
+          {
+            name: "Page",
+            value: truncateText(feedback.page || "Settings", 256),
+            inline: true,
+          },
+        ],
+        timestamp: feedback.createdAt,
+      },
+    ],
+  };
+}
+
 async function sendToWebhook(feedback: {
   category: FeedbackCategory;
   rating: number | null;
@@ -60,9 +104,11 @@ async function sendToWebhook(feedback: {
   page: string;
   createdAt: string;
 }) {
-  const webhookUrl =
+  const webhookUrl = (
     process.env.FEEDBACK_WEBHOOK_URL ||
-    process.env.DISCORD_WEBHOOK_URL;
+    process.env.DISCORD_WEBHOOK_URL ||
+    ""
+  ).trim();
 
   if (!webhookUrl) {
     console.warn(
@@ -78,7 +124,7 @@ async function sendToWebhook(feedback: {
   const isSlackWebhook = webhookUrl.includes("hooks.slack.com");
 
   const body = isDiscordWebhook
-    ? { content: webhookText }
+    ? buildDiscordWebhookBody(feedback)
     : isSlackWebhook
       ? { text: webhookText }
       : {
@@ -98,7 +144,10 @@ async function sendToWebhook(feedback: {
     const responseText = await response.text().catch(() => "");
 
     throw new Error(
-      `Feedback webhook request failed with ${response.status}. ${responseText}`
+      `Feedback webhook request failed with ${response.status}. ${truncateText(
+        responseText,
+        300
+      )}`
     );
   }
 
@@ -147,6 +196,20 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, delivered: true });
   } catch (error) {
     console.error("Feedback submission failed:", error);
+
+    if (
+      error instanceof Error &&
+      error.message.startsWith("Feedback webhook request failed")
+    ) {
+      return Response.json(
+        {
+          error:
+            "Discord rejected the feedback webhook request. Please check that the webhook URL is active and belongs to the correct channel.",
+          detail: error.message,
+        },
+        { status: 502 }
+      );
+    }
 
     return Response.json(
       { error: "Unable to send feedback right now. Please try again later." },
