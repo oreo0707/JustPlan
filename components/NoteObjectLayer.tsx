@@ -765,11 +765,21 @@ export function NoteObjectLayer({
     event: PointerEvent | React.PointerEvent,
     allowTouch = false
   ) {
+    const pointerWidth = event.width ?? 0;
+    const pointerHeight = event.height ?? 0;
+    const pointerSize = Math.max(pointerWidth, pointerHeight);
+    const pressure = event.pressure ?? 0;
+    const isStylusLikeTouchPointer =
+      event.pointerType === "touch" &&
+      allowTouch &&
+      ((pointerSize > 0 && pointerSize <= 10) ||
+        (pressure > 0.01 && (pointerSize === 0 || pointerSize <= 12)));
+
     return (
       event.pointerType === "pen" ||
       event.pointerType === "mouse" ||
       event.pointerType === "" ||
-      (allowTouch && event.pointerType === "touch")
+      isStylusLikeTouchPointer
     );
   }
 
@@ -3503,15 +3513,6 @@ export function NoteObjectLayer({
   function startDrawing(event: PointerEvent) {
     if (!drawingModeRef.current || drawingToolRef.current === "erase") return;
     if (!canUsePointerForDrawing(event, true)) return;
-    if (
-      event.pointerType !== "pen" &&
-      Date.now() < suppressPointerDrawingUntilRef.current
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
 
     const layerBounds = layerRef.current?.getBoundingClientRect();
     if (!layerBounds) return;
@@ -3523,6 +3524,16 @@ export function NoteObjectLayer({
     ) {
       return;
     }
+
+    if (
+      event.pointerType !== "pen" &&
+      Date.now() < suppressPointerDrawingUntilRef.current
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
 
     activeDrawingBoundsRef.current = layerBounds;
 
@@ -3557,8 +3568,25 @@ export function NoteObjectLayer({
       };
     }
 
-    function handleGestureTouchStart() {
-      tabletGestureRef.current = null;
+    function handleGestureTouchStart(event: TouchEvent) {
+      if (!drawingModeRef.current) {
+        tabletGestureRef.current = null;
+        return;
+      }
+
+      if (event.touches.length !== 2 && event.touches.length !== 3) {
+        tabletGestureRef.current = null;
+        return;
+      }
+
+      const center = getTouchCentroid(event.touches);
+      tabletGestureRef.current = {
+        touchCount: event.touches.length as 2 | 3,
+        startTime: Date.now(),
+        startX: center.x,
+        startY: center.y,
+        maxDistance: 0,
+      };
     }
 
     function handleGestureTouchMove(event: TouchEvent) {
@@ -3593,7 +3621,11 @@ export function NoteObjectLayer({
       const duration = Date.now() - gesture.startTime;
       if (duration > 420 || gesture.maxDistance > 28) return;
 
-      redoPendingDrawingStroke();
+      if (gesture.touchCount === 2) {
+        undoPendingDrawingStroke();
+      } else {
+        redoPendingDrawingStroke();
+      }
     }
 
     function handleNativePointerDown(event: PointerEvent) {
@@ -3719,17 +3751,6 @@ export function NoteObjectLayer({
       const touch = event.changedTouches[0];
       if (!touch) return;
       if (!isStylusTouch(touch)) {
-        if (
-          event.touches.length === 1 &&
-          (drawingToolRef.current === "draw" ||
-            drawingToolRef.current === "highlight")
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          startTouchDrawingOrErasing(touch);
-          return;
-        }
-
         if (event.touches.length === 1) {
           canvasFingerPanRef.current = {
             touchId: touch.identifier,
@@ -3740,9 +3761,10 @@ export function NoteObjectLayer({
         return;
       }
 
-      event.preventDefault();
-      event.stopPropagation();
-      startTouchDrawingOrErasing(touch);
+      if (startTouchDrawingOrErasing(touch)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     }
 
     function handleNativeTouchMove(event: TouchEvent) {
