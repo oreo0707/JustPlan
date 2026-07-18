@@ -60,10 +60,14 @@ async function sendToWebhook(feedback: {
   page: string;
   createdAt: string;
 }) {
-  const webhookUrl = process.env.FEEDBACK_WEBHOOK_URL;
+  const webhookUrl =
+    process.env.FEEDBACK_WEBHOOK_URL ||
+    process.env.DISCORD_WEBHOOK_URL;
 
   if (!webhookUrl) {
-    console.warn("FEEDBACK_WEBHOOK_URL is missing. Feedback was not delivered.");
+    console.warn(
+      "Feedback webhook URL is missing. Set FEEDBACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL."
+    );
     return { delivered: false, reason: "missing-webhook" };
   }
 
@@ -134,7 +138,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error:
-            "Feedback webhook is not configured yet. Add FEEDBACK_WEBHOOK_URL in Vercel and redeploy.",
+            "Feedback webhook is not configured yet. Add FEEDBACK_WEBHOOK_URL or DISCORD_WEBHOOK_URL in Vercel and redeploy.",
         },
         { status: 500 }
       );

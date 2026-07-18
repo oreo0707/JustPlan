@@ -1702,6 +1702,19 @@ export function NoteObjectLayer({
       unlockDocumentScrollForEraserStroke();
     }
 
+    function recoverStaleCanvasStroke() {
+      if (activeDrawingPointerIdRef.current === null) return;
+
+      commitDrawingPoints([...activeDrawingPointsRef.current]);
+      activeDrawingPointerIdRef.current = null;
+      canvasDrawingPointerIdRef.current = null;
+      canvasDrawingTouchIdRef.current = null;
+      activeDrawingPointsRef.current = [];
+      setActiveDrawingPoints([]);
+      clearLiveDrawingCanvas();
+      unlockDocumentScrollForEraserStroke();
+    }
+
     function handlePointerDown(event: PointerEvent) {
 
       if (!isDrawingPointer(event)) {
@@ -1789,7 +1802,7 @@ export function NoteObjectLayer({
         canvasDrawingPointerIdRef.current !== null ||
         activeDrawingPointerIdRef.current !== null
       ) {
-        return;
+        recoverStaleCanvasStroke();
       }
 
       const touch = event.changedTouches[0];
@@ -1899,6 +1912,8 @@ export function NoteObjectLayer({
     window.addEventListener("touchcancel", handleTouchEnd, {
       passive: false,
     });
+    window.addEventListener("blur", recoverStaleCanvasStroke);
+    document.addEventListener("visibilitychange", recoverStaleCanvasStroke);
 
     return () => {
       activeCanvas.removeEventListener("pointerdown", handlePointerDown);
@@ -1909,6 +1924,8 @@ export function NoteObjectLayer({
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("touchcancel", handleTouchEnd);
+      window.removeEventListener("blur", recoverStaleCanvasStroke);
+      document.removeEventListener("visibilitychange", recoverStaleCanvasStroke);
     };
     // Canvas drawing intentionally reads current settings through refs so the
     // listeners stay stable while the user writes quickly.
