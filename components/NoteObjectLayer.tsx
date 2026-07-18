@@ -3515,6 +3515,7 @@ export function NoteObjectLayer({
   useEffect(() => {
     const drawingLayer = layerRef.current;
     if (!drawingLayer) return;
+    const activeDrawingLayer = drawingLayer;
 
     function getTouchCentroid(touches: TouchList) {
       const touchItems = Array.from(touches);
@@ -3621,13 +3622,49 @@ export function NoteObjectLayer({
       return getPointInBounds(touch.clientX, touch.clientY, layerBounds);
     }
 
+    function getLayerScrollElement(): HTMLElement | Window {
+      let element = activeDrawingLayer.parentElement;
+
+      while (element) {
+        const styles = window.getComputedStyle(element);
+        const canScrollY =
+          (styles.overflowY === "auto" ||
+            styles.overflowY === "scroll" ||
+            styles.overflowY === "overlay") &&
+          element.scrollHeight > element.clientHeight;
+
+        if (canScrollY) return element;
+        element = element.parentElement;
+      }
+
+      return window;
+    }
+
+    function scrollFingerPanTarget(target: HTMLElement | Window, deltaY: number) {
+      if (target === window) {
+        window.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
+        return;
+      }
+
+      (target as HTMLElement).scrollTop += deltaY;
+    }
+
     function handleNativeTouchStart(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
       if (!drawingModeRef.current) return;
 
       const touch = event.changedTouches[0];
       if (!touch) return;
-      if (!isStylusTouch(touch)) return;
+      if (!isStylusTouch(touch)) {
+        if (event.touches.length === 1) {
+          canvasFingerPanRef.current = {
+            touchId: touch.identifier,
+            lastY: touch.clientY,
+            scrollElement: getLayerScrollElement(),
+          };
+        }
+        return;
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -3657,6 +3694,21 @@ export function NoteObjectLayer({
 
     function handleNativeTouchMove(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      const fingerPan = canvasFingerPanRef.current;
+
+      if (fingerPan) {
+        const fingerTouch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === fingerPan.touchId
+        );
+        if (!fingerTouch) return;
+
+        event.preventDefault();
+        const deltaY = fingerPan.lastY - fingerTouch.clientY;
+        fingerPan.lastY = fingerTouch.clientY;
+        scrollFingerPanTarget(fingerPan.scrollElement, deltaY);
+        return;
+      }
+
       const eraserTouchId = eraserTouchIdRef.current;
 
       if (eraserTouchId !== null) {
@@ -3691,6 +3743,19 @@ export function NoteObjectLayer({
 
     function handleNativeTouchEnd(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      const fingerPan = canvasFingerPanRef.current;
+
+      if (fingerPan) {
+        const endedFingerTouch = Array.from(event.changedTouches).find(
+          (item) => item.identifier === fingerPan.touchId
+        );
+        if (endedFingerTouch) {
+          canvasFingerPanRef.current = null;
+          event.preventDefault();
+          return;
+        }
+      }
+
       const eraserTouchId = eraserTouchIdRef.current;
 
       if (eraserTouchId !== null) {
@@ -4081,7 +4146,9 @@ export function NoteObjectLayer({
       }
       style={{
         touchAction:
-          shouldLockEraserScroll || selectionMode ? "none" : "pan-y",
+          drawingMode || selectionMode || shouldLockEraserScroll
+            ? "none"
+            : "pan-y",
         WebkitUserSelect: drawingMode || selectionMode ? "none" : undefined,
         userSelect: drawingMode || selectionMode ? "none" : undefined,
         WebkitTouchCallout: drawingMode || selectionMode ? "none" : undefined,
