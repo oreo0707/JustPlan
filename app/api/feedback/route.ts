@@ -53,50 +53,6 @@ function buildWebhookText(feedback: {
   ].join("\n");
 }
 
-function truncateText(value: string, maxLength: number) {
-  return value.length > maxLength
-    ? `${value.slice(0, Math.max(0, maxLength - 1))}…`
-    : value;
-}
-
-function buildDiscordWebhookBody(feedback: {
-  category: FeedbackCategory;
-  rating: number | null;
-  message: string;
-  page: string;
-  createdAt: string;
-}) {
-  return {
-    username: "Just Plan Feedback",
-    allowed_mentions: { parse: [] },
-    embeds: [
-      {
-        title: "New anonymous Just Plan feedback",
-        color: 5814783,
-        description: truncateText(feedback.message, 4000),
-        fields: [
-          {
-            name: "Category",
-            value: feedback.category,
-            inline: true,
-          },
-          {
-            name: "Rating",
-            value: String(feedback.rating ?? "Not provided"),
-            inline: true,
-          },
-          {
-            name: "Page",
-            value: truncateText(feedback.page || "Settings", 256),
-            inline: true,
-          },
-        ],
-        timestamp: feedback.createdAt,
-      },
-    ],
-  };
-}
-
 async function sendToWebhook(feedback: {
   category: FeedbackCategory;
   rating: number | null;
@@ -124,7 +80,7 @@ async function sendToWebhook(feedback: {
   const isSlackWebhook = webhookUrl.includes("hooks.slack.com");
 
   const body = isDiscordWebhook
-    ? buildDiscordWebhookBody(feedback)
+    ? { content: webhookText }
     : isSlackWebhook
       ? { text: webhookText }
       : {
@@ -144,8 +100,8 @@ async function sendToWebhook(feedback: {
     const responseText = await response.text().catch(() => "");
 
     throw new Error(
-      `Feedback webhook request failed with ${response.status}. ${truncateText(
-        responseText,
+      `Feedback webhook request failed with ${response.status}. ${responseText.slice(
+        0,
         300
       )}`
     );
