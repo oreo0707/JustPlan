@@ -3559,8 +3559,18 @@ export function NoteObjectLayer({
     if (!drawingLayer) return;
     const activeDrawingLayer = drawingLayer;
 
+    function isInteractiveControlTarget(target: EventTarget | null) {
+      return (
+        target instanceof Element &&
+        target.closest(
+          "button, a, input, textarea, select, option, label, [role='button'], [data-note-ui]"
+        ) !== null
+      );
+    }
+
     function handleNativePointerDown(event: PointerEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      if (isInteractiveControlTarget(event.target)) return;
       if (activeDrawingPointerIdRef.current === event.pointerId) return;
       startDrawing(event);
     }
@@ -3688,6 +3698,7 @@ export function NoteObjectLayer({
 
     function handleNativeTouchStart(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      if (isInteractiveControlTarget(event.target)) return;
       if (!drawingModeRef.current) return;
       if (activeDrawingPointerIdRef.current !== null) return;
 
@@ -3769,6 +3780,10 @@ export function NoteObjectLayer({
 
     function handleNativeTouchEnd(event: TouchEvent) {
       if (event.target === liveDrawingCanvasRef.current) return;
+      if (isInteractiveControlTarget(event.target)) {
+        canvasFingerPanRef.current = null;
+        return;
+      }
       const fingerPan = canvasFingerPanRef.current;
 
       if (fingerPan) {
