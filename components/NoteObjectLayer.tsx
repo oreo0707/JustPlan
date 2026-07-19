@@ -57,6 +57,7 @@ const NOTE_FONT_FAMILIES = [
 ];
 
 const NOTE_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36];
+const LINE_ENDPOINT_SNAP_DISTANCE = 18;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -721,6 +722,46 @@ export function NoteObjectLayer({
     };
   }
 
+  function snapLineEndpointToNearbyLine(
+    point: DrawingPoint,
+    excludeObjectId?: string
+  ) {
+    const clampedPoint = {
+      x: clampValue(point.x, 0, pageWidth),
+      y: clampValue(point.y, 0, drawingHeight),
+    };
+    let snappedPoint = clampedPoint;
+    let closestDistance = LINE_ENDPOINT_SNAP_DISTANCE;
+
+    objectsRef.current.forEach((lineObject) => {
+      if (lineObject.id === excludeObjectId || lineObject.type !== "line") {
+        return;
+      }
+
+      const linePoints = getLinePoints(lineObject);
+      [
+        { x: linePoints.startX, y: linePoints.startY },
+        { x: linePoints.endX, y: linePoints.endY },
+      ].forEach((targetPoint) => {
+        const clampedTargetPoint = {
+          x: clampValue(targetPoint.x, 0, pageWidth),
+          y: clampValue(targetPoint.y, 0, drawingHeight),
+        };
+        const distance = Math.hypot(
+          clampedTargetPoint.x - clampedPoint.x,
+          clampedTargetPoint.y - clampedPoint.y
+        );
+
+        if (distance <= closestDistance) {
+          closestDistance = distance;
+          snappedPoint = clampedTargetPoint;
+        }
+      });
+    });
+
+    return snappedPoint;
+  }
+
   function clampSizeForObject(
     object: NoteObject,
     width: number,
@@ -1293,8 +1334,8 @@ export function NoteObjectLayer({
   function createStraightLineFromStroke(points: DrawingPoint[]): NoteObject | null {
     if (points.length < 2) return null;
 
-    const firstPoint = points[0];
-    const lastPoint = points[points.length - 1];
+    const firstPoint = snapLineEndpointToNearbyLine(points[0]);
+    const lastPoint = snapLineEndpointToNearbyLine(points[points.length - 1]);
     const endDistance = Math.hypot(
       lastPoint.x - firstPoint.x,
       lastPoint.y - firstPoint.y
@@ -1327,19 +1368,16 @@ export function NoteObjectLayer({
       if (object.id !== activeLineId || object.type !== "line") return object;
 
       const points = getLinePoints(object);
-      const clampedEnd = {
-        x: clampValue(nextPoint.x, 0, pageWidth),
-        y: clampValue(nextPoint.y, 0, drawingHeight),
-      };
+      const snappedEnd = snapLineEndpointToNearbyLine(nextPoint, activeLineId);
 
       return {
         ...object,
         x: points.startX,
         y: points.startY,
-        endX: clampedEnd.x,
-        endY: clampedEnd.y,
-        width: Math.max(1, Math.abs(clampedEnd.x - points.startX)),
-        height: Math.max(1, Math.abs(clampedEnd.y - points.startY)),
+        endX: snappedEnd.x,
+        endY: snappedEnd.y,
+        width: Math.max(1, Math.abs(snappedEnd.x - points.startX)),
+        height: Math.max(1, Math.abs(snappedEnd.y - points.startY)),
       };
     });
 
@@ -3225,41 +3263,6 @@ export function NoteObjectLayer({
     const pointerX = event.clientX;
     const pointerY = event.clientY;
     const originalPoints = getLinePoints(object);
-    const snapDistance = 18;
-
-    function snapToNearbyLineEndpoint(x: number, y: number) {
-      let snappedPoint = {
-        x: clampValue(x, 0, pageWidth),
-        y: clampValue(y, 0, drawingHeight),
-      };
-      let closestDistance = snapDistance;
-
-      objects.forEach((lineObject) => {
-        if (lineObject.id === object.id || lineObject.type !== "line") return;
-
-        const linePoints = getLinePoints(lineObject);
-        [
-          { x: linePoints.startX, y: linePoints.startY },
-          { x: linePoints.endX, y: linePoints.endY },
-        ].forEach((targetPoint) => {
-          const clampedTargetPoint = {
-            x: clampValue(targetPoint.x, 0, pageWidth),
-            y: clampValue(targetPoint.y, 0, drawingHeight),
-          };
-          const distance = Math.hypot(
-            clampedTargetPoint.x - snappedPoint.x,
-            clampedTargetPoint.y - snappedPoint.y
-          );
-
-          if (distance <= closestDistance) {
-            closestDistance = distance;
-            snappedPoint = clampedTargetPoint;
-          }
-        });
-      });
-
-      return snappedPoint;
-    }
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
@@ -3270,9 +3273,9 @@ export function NoteObjectLayer({
       );
 
       if (endpoint === "start") {
-        const snappedStart = snapToNearbyLineEndpoint(
-          originalPoints.startX + dx,
-          originalPoints.startY + dy
+        const snappedStart = snapLineEndpointToNearbyLine(
+          { x: originalPoints.startX + dx, y: originalPoints.startY + dy },
+          object.id
         );
 
         updateObject(object.id, {
@@ -3284,9 +3287,9 @@ export function NoteObjectLayer({
         return;
       }
 
-      const snappedEnd = snapToNearbyLineEndpoint(
-        originalPoints.endX + dx,
-        originalPoints.endY + dy
+      const snappedEnd = snapLineEndpointToNearbyLine(
+        { x: originalPoints.endX + dx, y: originalPoints.endY + dy },
+        object.id
       );
 
       updateObject(object.id, {
