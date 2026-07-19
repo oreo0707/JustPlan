@@ -57,6 +57,7 @@ const NOTE_FONT_FAMILIES = [
 ];
 
 const NOTE_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36];
+const LINE_ENDPOINT_SNAP_DISTANCE = 18;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -569,6 +570,7 @@ export function NoteObjectLayer({
   const straightLineHoldEligibleRef = useRef(false);
   const straightLineConvertedRef = useRef(false);
   const straightLineLastPointRef = useRef<DrawingPoint | null>(null);
+  const activeStraightLineObjectIdRef = useRef<string | null>(null);
   const suppressPointerDrawingUntilRef = useRef(0);
   const canvasDrawingTouchIdRef = useRef<number | null>(null);
   const canvasDrawingPointerIdRef = useRef<number | null>(null);
@@ -718,6 +720,46 @@ export function NoteObjectLayer({
       dx: clampValue(dx, -bounds.left, pageWidth - (bounds.left + bounds.width)),
       dy: clampValue(dy, -bounds.top, drawingHeight - (bounds.top + bounds.height)),
     };
+  }
+
+  function snapLineEndpointToNearbyLine(
+    point: DrawingPoint,
+    excludeObjectId?: string
+  ) {
+    const clampedPoint = {
+      x: clampValue(point.x, 0, pageWidth),
+      y: clampValue(point.y, 0, drawingHeight),
+    };
+    let snappedPoint = clampedPoint;
+    let closestDistance = LINE_ENDPOINT_SNAP_DISTANCE;
+
+    objectsRef.current.forEach((lineObject) => {
+      if (lineObject.id === excludeObjectId || lineObject.type !== "line") {
+        return;
+      }
+
+      const linePoints = getLinePoints(lineObject);
+      [
+        { x: linePoints.startX, y: linePoints.startY },
+        { x: linePoints.endX, y: linePoints.endY },
+      ].forEach((targetPoint) => {
+        const clampedTargetPoint = {
+          x: clampValue(targetPoint.x, 0, pageWidth),
+          y: clampValue(targetPoint.y, 0, drawingHeight),
+        };
+        const distance = Math.hypot(
+          clampedTargetPoint.x - clampedPoint.x,
+          clampedTargetPoint.y - clampedPoint.y
+        );
+
+        if (distance <= closestDistance) {
+          closestDistance = distance;
+          snappedPoint = clampedTargetPoint;
+        }
+      });
+    });
+
+    return snappedPoint;
   }
 
   function clampSizeForObject(
@@ -1292,8 +1334,8 @@ export function NoteObjectLayer({
   function createStraightLineFromStroke(points: DrawingPoint[]): NoteObject | null {
     if (points.length < 2) return null;
 
-    const firstPoint = points[0];
-    const lastPoint = points[points.length - 1];
+    const firstPoint = snapLineEndpointToNearbyLine(points[0]);
+    const lastPoint = snapLineEndpointToNearbyLine(points[points.length - 1]);
     const endDistance = Math.hypot(
       lastPoint.x - firstPoint.x,
       lastPoint.y - firstPoint.y
@@ -1316,6 +1358,32 @@ export function NoteObjectLayer({
       flipX: false,
       flipY: false,
     };
+  }
+
+  function updateActiveStraightLineEndpoint(nextPoint: DrawingPoint) {
+    const activeLineId = activeStraightLineObjectIdRef.current;
+    if (!activeLineId) return false;
+
+    const nextObjects = objectsRef.current.map((object) => {
+      if (object.id !== activeLineId || object.type !== "line") return object;
+
+      const points = getLinePoints(object);
+      const snappedEnd = snapLineEndpointToNearbyLine(nextPoint, activeLineId);
+
+      return {
+        ...object,
+        x: points.startX,
+        y: points.startY,
+        endX: snappedEnd.x,
+        endY: snappedEnd.y,
+        width: Math.max(1, Math.abs(snappedEnd.x - points.startX)),
+        height: Math.max(1, Math.abs(snappedEnd.y - points.startY)),
+      };
+    });
+
+    objectsRef.current = nextObjects;
+    onChangeObjectsRef.current(nextObjects, { recordHistory: false });
+    return true;
   }
 
   function convertActiveDrawingToRecognizedShape(forceStraightLine = false) {
@@ -1345,6 +1413,8 @@ export function NoteObjectLayer({
     const nextObjects = [...objectsRef.current, recognizedObject];
     objectsRef.current = nextObjects;
     onChangeObjectsRef.current(nextObjects);
+    activeStraightLineObjectIdRef.current =
+      recognizedObject.type === "line" ? recognizedObject.id : null;
     onSelectionChangeRef.current(
       recognizedObject.type === "line" ? [] : [recognizedObject.id]
     );
@@ -1429,6 +1499,7 @@ export function NoteObjectLayer({
       straightLineConvertedRef.current = false;
       straightLineHoldEligibleRef.current = false;
       straightLineLastPointRef.current = null;
+      activeStraightLineObjectIdRef.current = null;
       clearLiveDrawingCanvas();
       return;
     }
@@ -1488,7 +1559,10 @@ export function NoteObjectLayer({
   }
 
   function addLiveCanvasPoint(nextPoint: DrawingPoint) {
-    if (straightLineConvertedRef.current) return;
+    if (straightLineConvertedRef.current) {
+      updateActiveStraightLineEndpoint(nextPoint);
+      return;
+    }
     if (!isPointInsidePaper(nextPoint)) return;
 
     const context = prepareLiveDrawingCanvas();
@@ -1710,6 +1784,7 @@ export function NoteObjectLayer({
         canStraighten && drawingToolRef.current === "draw";
       straightLineConvertedRef.current = false;
       straightLineLastPointRef.current = null;
+      activeStraightLineObjectIdRef.current = null;
       clearStraightLineHoldTimer();
       activeDrawingPointsRef.current = [];
       lockDocumentScrollForEraserStroke();
@@ -3188,41 +3263,6 @@ export function NoteObjectLayer({
     const pointerX = event.clientX;
     const pointerY = event.clientY;
     const originalPoints = getLinePoints(object);
-    const snapDistance = 18;
-
-    function snapToNearbyLineEndpoint(x: number, y: number) {
-      let snappedPoint = {
-        x: clampValue(x, 0, pageWidth),
-        y: clampValue(y, 0, drawingHeight),
-      };
-      let closestDistance = snapDistance;
-
-      objects.forEach((lineObject) => {
-        if (lineObject.id === object.id || lineObject.type !== "line") return;
-
-        const linePoints = getLinePoints(lineObject);
-        [
-          { x: linePoints.startX, y: linePoints.startY },
-          { x: linePoints.endX, y: linePoints.endY },
-        ].forEach((targetPoint) => {
-          const clampedTargetPoint = {
-            x: clampValue(targetPoint.x, 0, pageWidth),
-            y: clampValue(targetPoint.y, 0, drawingHeight),
-          };
-          const distance = Math.hypot(
-            clampedTargetPoint.x - snappedPoint.x,
-            clampedTargetPoint.y - snappedPoint.y
-          );
-
-          if (distance <= closestDistance) {
-            closestDistance = distance;
-            snappedPoint = clampedTargetPoint;
-          }
-        });
-      });
-
-      return snappedPoint;
-    }
 
     function handleMove(moveEvent: PointerEvent) {
       moveEvent.preventDefault();
@@ -3233,9 +3273,9 @@ export function NoteObjectLayer({
       );
 
       if (endpoint === "start") {
-        const snappedStart = snapToNearbyLineEndpoint(
-          originalPoints.startX + dx,
-          originalPoints.startY + dy
+        const snappedStart = snapLineEndpointToNearbyLine(
+          { x: originalPoints.startX + dx, y: originalPoints.startY + dy },
+          object.id
         );
 
         updateObject(object.id, {
@@ -3247,9 +3287,9 @@ export function NoteObjectLayer({
         return;
       }
 
-      const snappedEnd = snapToNearbyLineEndpoint(
-        originalPoints.endX + dx,
-        originalPoints.endY + dy
+      const snappedEnd = snapLineEndpointToNearbyLine(
+        { x: originalPoints.endX + dx, y: originalPoints.endY + dy },
+        object.id
       );
 
       updateObject(object.id, {
@@ -3404,7 +3444,10 @@ export function NoteObjectLayer({
   }
 
   function addActiveDrawingPoint(nextPoint: DrawingPoint) {
-    if (straightLineConvertedRef.current) return;
+    if (straightLineConvertedRef.current) {
+      updateActiveStraightLineEndpoint(nextPoint);
+      return;
+    }
     if (!isPointInsidePaper(nextPoint)) return;
 
     const points = activeDrawingPointsRef.current;
@@ -3445,6 +3488,7 @@ export function NoteObjectLayer({
       straightLineConvertedRef.current = false;
       straightLineHoldEligibleRef.current = false;
       straightLineLastPointRef.current = null;
+      activeStraightLineObjectIdRef.current = null;
       return;
     }
 
@@ -3509,6 +3553,7 @@ export function NoteObjectLayer({
       canStraighten && drawingToolRef.current === "draw";
     straightLineConvertedRef.current = false;
     straightLineLastPointRef.current = null;
+    activeStraightLineObjectIdRef.current = null;
     clearStraightLineHoldTimer();
     activeDrawingPointsRef.current = [firstPoint];
     lockDocumentScrollForEraserStroke();
@@ -3563,7 +3608,7 @@ export function NoteObjectLayer({
       return (
         target instanceof Element &&
         target.closest(
-          "button, a, input, textarea, select, option, label, [role='button'], [data-note-ui]"
+          "button, a, input, textarea, select, option, label, [role='button'], [data-note-ui], [data-note-object]"
         ) !== null
       );
     }
@@ -4323,8 +4368,11 @@ export function NoteObjectLayer({
           return (
             <div
               key={object.id}
+              data-note-object={object.id}
               className={`absolute inset-0 ${
-                canFingerUseRecognizedShape ? "pointer-events-auto" : "pointer-events-none"
+                canObjectReceivePointer || canFingerUseRecognizedShape
+                  ? "pointer-events-auto"
+                  : "pointer-events-none"
               }`}
               style={{
                 zIndex: selected
@@ -4716,6 +4764,7 @@ export function NoteObjectLayer({
         return (
           <div
             key={object.id}
+            data-note-object={object.id}
             className={`${
               !canObjectReceivePointer &&
               !showObjectControls &&
