@@ -334,7 +334,11 @@ const aiRequestKey = JSON.stringify(aiRequestPayload);
         },
         body: aiRequestKey,
       });
-      const result = (await response.json()) as { summary?: string };
+      const result = (await response.json()) as {
+        summary?: string;
+        useFallback?: boolean;
+        source?: string;
+      };
 
       if (!response.ok || !result.summary) {
         throw new Error(result.summary ?? "Unable to generate summary.");

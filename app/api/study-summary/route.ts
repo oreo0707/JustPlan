@@ -50,7 +50,7 @@ async function generateWithGemini(prompt: string) {
   }
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.8-flash",
     contents: prompt,
   });
 
@@ -103,14 +103,12 @@ export async function POST(request: Request) {
     } catch (ollamaError) {
       console.error("Ollama failed:", ollamaError);
 
-      return Response.json(
-        {
-          summary:
-            "AI services are unavailable. A local study suggestion will be shown instead.",
-          useFallback: true,
-        },
-        { status: 500 }
-      );
+      return Response.json({
+        summary:
+          "AI services are unavailable right now. Try checking your urgent tasks first, then focus on the subject with the most pending work.",
+        useFallback: true,
+        source: "fallback",
+      });
     }
   }
 }
