@@ -93,22 +93,26 @@ export async function POST(request: Request) {
   } catch (geminiError) {
     console.error("Gemini failed:", geminiError);
 
-    try {
-      const ollamaSummary = await generateWithOllama(prompt);
+    const isLocalDevelopment = process.env.NODE_ENV === "development";
 
-      return Response.json({
-        summary: ollamaSummary,
-        source: "ollama",
-      });
-    } catch (ollamaError) {
-      console.error("Ollama failed:", ollamaError);
+    if (isLocalDevelopment) {
+      try {
+        const ollamaSummary = await generateWithOllama(prompt);
 
-      return Response.json({
-        summary:
-          "AI services are unavailable right now. Try checking your urgent tasks first, then focus on the subject with the most pending work.",
-        useFallback: true,
-        source: "fallback",
-      });
+        return Response.json({
+          summary: ollamaSummary,
+          source: "ollama",
+        });
+      } catch (ollamaError) {
+        console.error("Ollama failed:", ollamaError);
+      }
     }
+
+    return Response.json({
+      summary:
+        "AI services are unavailable right now. Try checking your urgent tasks first, then focus on the subject with the most pending work.",
+      useFallback: true,
+      source: "fallback",
+    });
   }
 }
